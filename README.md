@@ -232,6 +232,7 @@ before anything new is approved.
 ```sh
 skill-store link <name>      # must exist, pass `check`, and be approved; adds to manifest, creates link, enforces cap
 skill-store unlink <name>    # removes ONLY the link (never the store copy), removes from manifest
+skill-store unlink --all      # removes every store link in this checkout; manifest unchanged (before deleting a worktree)
 skill-store sync             # make links match the manifest; idempotent, safe to run any time
 skill-store status           # store skills, approval, linked here?, last used, cap usage
 ```
@@ -282,7 +283,8 @@ existing `hooks` object instead of replacing it. Check the result with `/hooks` 
 **Recommended setup: user-level, via the wrapper scripts.** These live in `~/.claude/settings.json`,
 so they cover every project and every AO worker. The wrappers in [`hooks/`](hooks/) find
 `skill-store` even if it isn't on the hook's PATH (`SKILL_STORE_CMD`, then PATH, then
-`python -m skillstore`), skip `sync` in projects without a manifest, and always exit 0.
+`python -m skillstore`) and always exit 0. In a project without a manifest, `sync` is a no-op that
+creates nothing, so a user-level SessionStart hook is harmless in unrelated projects.
 
 ### Windows
 
@@ -329,8 +331,8 @@ Merge [`snippets/settings.linux.json`](snippets/settings.linux.json) into `~/.cl
 
 New worktrees start without links. Besides the SessionStart hook, an AO project can run
 `skill-store sync` as a `--post-create` step. As a `--pre-remove` step it can run
-[`hooks/unlink-all.ps1`](hooks/unlink-all.ps1) / [`hooks/unlink-all.sh`](hooks/unlink-all.sh),
-which remove the worktree's store links non-recursively before AO deletes the directory. See
+`skill-store unlink --all`, which removes the worktree's store links non-recursively, without
+editing the manifest, before AO deletes the directory. See
 [snippets/ao-worktree-setup.md](snippets/ao-worktree-setup.md).
 
 ## Unlink safety (hard rule)
@@ -352,8 +354,8 @@ which remove the worktree's store links non-recursively before AO deletes the di
 - **Never use the vercel `skills` CLI `remove`** (`npx skills remove …`). It has no unlink, and
   `remove` deletes the canonical copy too. Leave links it created (e.g.
   `~/.claude/skills/{find-skills,wayfinder}` → `~/.agents/skills/`) alone; this tool never touches them.
-- Before deleting a checkout or worktree that has links, run `hooks/unlink-all.(ps1|sh)` (or
-  `skill-store unlink` for each skill) first.
+- Before deleting a checkout or worktree that has links, run `skill-store unlink --all` there
+  first. It removes every store link non-recursively and leaves the manifest unchanged.
 
 Put this rule in every project that uses the store. Copy
 [`snippets/CLAUDE.skill-store.md`](snippets/CLAUDE.skill-store.md) into its `CLAUDE.md`, so agents
@@ -467,7 +469,8 @@ the raw pages in `build/<name>/` make this cheap, unless they were deleted too.
 | `approve <name>` | record your approval in `store.json` |
 | `link <name>` | approved + checked only; add to manifest, link, enforce cap (LRU unlink, reported) |
 | `unlink <name>` | remove the link only; remove from manifest |
-| `sync [--quiet]` | make links match the manifest; idempotent; never fails a session start |
+| `unlink --all` | remove every store link in this project, non-recursively; manifest unchanged; exits 0 if none |
+| `sync [--quiet]` | make links match the manifest; idempotent; never fails a session start; no-op (creates nothing) without a manifest |
 | `status` | skills, approval, linked here, last used, cap usage |
 | `prune [--cap N]` | unlink LRU skills down to the cap (on demand only) |
 | `log-usage` | hook entry point: read hook JSON on stdin, append to `usage.jsonl`; always exits 0 |
@@ -482,7 +485,7 @@ Global flags: `--store PATH`, `--project PATH`, `--json`. `skill-store <command>
 | `bin/` | thin `skill-store.ps1` / `.sh` / `.cmd` wrappers |
 | `schemas/`, `examples/` | JSON Schemas; example manifest, `store.json`, build recipe |
 | `tests/` | tests for link/unlink/sync/prune safety (`pytest`) |
-| `hooks/` | Claude Code hook wrappers and `unlink-all` (AO pre-remove) scripts |
+| `hooks/` | Claude Code hook wrappers (`log-usage`, `sync --quiet`) |
 | `snippets/` | `settings.json` snippets (Windows, Linux, direct), CLAUDE.md safety section, AO worktree setup |
 | `docs/` | [design rationale](docs/design.md), [build recipe](docs/build-recipe.md), [schemas](docs/schemas.md), [verification checklist](docs/verification.md) |
 

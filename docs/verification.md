@@ -135,7 +135,8 @@ Unlink first, then delete the scratch dirs. **Never** delete the project with a 
 while links exist (it would recurse into the store through them):
 
 ```sh
-skill-store unlink verify-alpha; skill-store unlink verify-beta     # in each checkout
+skill-store unlink --all --project ../proj-wt     # removes the worktree's store links; manifest unchanged
+skill-store unlink --all --project "$proj"
 git -C "$proj" worktree remove ../proj-wt
 ```
 

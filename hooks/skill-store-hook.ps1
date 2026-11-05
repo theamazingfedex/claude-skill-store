@@ -6,7 +6,7 @@
 # Same contract as skill-store-hook.sh:
 #   * finds skill-store via $env:SKILL_STORE_CMD, then `skill-store` on PATH,
 #     then `py -3 -m skillstore` / `python -m skillstore`;
-#   * skips `sync` in projects without .claude\skills.manifest.json;
+#   * skips `sync` in projects without .claude\skills.manifest.json (where it is a no-op anyway);
 #   * always exits 0, so it never blocks a tool call or a session start.
 #
 # Hook JSON arrives on stdin; for log-usage it is forwarded to skill-store as UTF-8.

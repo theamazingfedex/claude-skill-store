@@ -7,8 +7,8 @@
 # Why a wrapper instead of calling `skill-store` directly:
 #   * it finds skill-store even when it is not on the hook's PATH
 #     (SKILL_STORE_CMD, then `skill-store`, then `python3 -m skillstore`);
-#   * `sync` is skipped in projects without .claude/skills.manifest.json,
-#     so a user-level SessionStart hook never touches unrelated projects;
+#   * `sync` is skipped in projects without .claude/skills.manifest.json, which saves
+#     a Python start-up there (`sync` itself is a no-op without a manifest anyway);
 #   * it always exits 0, so a broken store never blocks a tool call or a session.
 #
 # Hook JSON arrives on stdin and is passed straight through to skill-store.
