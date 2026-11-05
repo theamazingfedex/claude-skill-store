@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "skill-store log-usage",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

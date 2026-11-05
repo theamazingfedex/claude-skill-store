@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "skill-store sync --quiet",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

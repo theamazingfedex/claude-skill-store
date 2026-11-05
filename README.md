@@ -1,0 +1,495 @@
+# claude-skill-store
+
+A user-level **skills store** for [Claude Code](https://code.claude.com/docs). You acquire skills
+once into a store outside every project. Each project then links in only the small,
+approved, capped set it needs. Pruning **unlinks and never deletes**, so a skill can be
+re-linked later without being rebuilt or re-downloaded.
+
+Works on **Windows** (NTFS junctions, no admin or Developer Mode needed) and **Linux/macOS**
+(symlinks).
+
+- [Why: the context budget](#why-the-context-budget)
+- [How it works](#how-it-works)
+- [Prerequisites](#prerequisites)
+- [Install](#install): [Windows](#windows-powershell) · [Linux](#linux-bash)
+- [Initialise the store](#initialise-the-store)
+- [Set up a project](#set-up-a-project-manifest-and-gitignore)
+- [Build a skill](#build-a-skill) · [Approve it](#approve-a-skill) · [Link, unlink, sync](#link-unlink-sync-status)
+- [Cap and pruning](#cap-and-pruning)
+- [Enable the hooks](#enable-the-hooks-usage-tracking-and-session-start-sync)
+- [Unlink safety (hard rule)](#unlink-safety-hard-rule)
+- [Verify in a fresh Claude Code session](#verify-in-a-fresh-claude-code-session)
+- [Troubleshooting](#troubleshooting)
+- [Command reference](#command-reference) · [Repo layout](#repo-layout) · [License](#license)
+
+## Why: the context budget
+
+Every installed skill puts a **listing entry** (name + description) into Claude's context on
+**every turn**, whether or not it is ever used. All entries share one budget:
+`skillListingBudgetFraction`, **1 % of the context window** by default, with each description
+capped at 1,536 chars. When the listing overflows, Claude Code drops the descriptions of the
+least-used skills, and a skill without a description no longer auto-triggers. Synced claude.ai
+skills alone can fill most of that 1 %.
+
+So installing every useful skill into `~/.claude/skills` makes all of them worse. The store keeps
+skills **out of every place Claude Code scans**. Each project links in only what it needs, by
+default **at most 8 domain skills**, and every store skill must pass admission rules that keep it
+cheap:
+
+| Layer | Costs context | Admission rule |
+|---|---|---|
+| Listing entry | every turn | description ≤ **500 chars**, use case first, **quoted** YAML |
+| `SKILL.md` body | once invoked, for the rest of the session | ≤ **4k tokens** (chars / 4) |
+| each reference file | only when read (one Read returns ≤ 25k tokens) | ≤ **25k tokens**, with a table of contents |
+
+Background and measurements: [docs/design.md](docs/design.md).
+
+## How it works
+
+```
+~/.skill-store/                                   (Windows: %USERPROFILE%\.skill-store\)
+├── skills/<name>/      SKILL.md + references/    ◄─┐ linkable skills
+├── build/<name>/       skill-seekers cwd + raw pages (rebuilds need no re-download)
+├── store.json          registry: source, version, built_at, approved, last_used
+└── usage.jsonl         one line per Skill tool call (written by the usage hook)
+                                                    │
+<project>/.claude/                                  │
+├── skills.manifest.json   committed: {"version":1,"cap":8,"skills":[...]}
+└── skills/                                         │
+    ├── .gitignore         committed: "*" + "!.gitignore"
+    └── <name>  ── junction (Windows) / symlink ────┘   never committed
+```
+
+- **build** a skill into the store (free: anyone or any automation may do it);
+- **approve** it (the user's explicit decision, recorded in `store.json`, needed once per skill);
+- **link** it into a project (adds it to the manifest and creates the link; re-linking an approved
+  skill needs no new approval);
+- **sync** at session start makes the links in a checkout match its manifest (new worktrees
+  start with no links);
+- past the cap, the **least recently used** link is unlinked automatically and reported;
+- the **usage hook** logs each Skill tool call, which is what "least recently used" is based on.
+
+The store lives outside `~/.claude/skills` (Claude Code manages that directory itself), outside
+`~/.agents` (owned by the vercel `skills` CLI), and outside every repo. Scraped docs are
+third-party text and must never end up in a project's git history.
+
+## Prerequisites
+
+| | Version | Needed for |
+|---|---|---|
+| Python | **3.10+** | the `skill-store` CLI (stdlib + PyYAML) |
+| git | any recent | cloning; project root detection |
+| [Claude Code](https://code.claude.com/docs) | recent (`/skill-doctor` needs v2.1.252+) | using the skills, hooks |
+| skill-seekers | **exactly 3.1.3**: `pip install skill-seekers==3.1.3` | only `skill-store build` |
+| `gh` (GitHub CLI) | optional | cloning this private repo, reporting verification results |
+
+On Windows, nothing needs admin rights or Developer Mode: the tool uses directory **junctions**,
+not symlinks.
+
+## Install
+
+The examples clone into `~/src/claude-skill-store`. Any path works, but the hook snippets in
+[`snippets/`](snippets/) use that one, so adjust them if yours differs.
+
+### Windows (PowerShell)
+
+```powershell
+# 1. Clone (private repo: gh handles auth; plain git works too if you have access)
+New-Item -ItemType Directory -Force "$env:USERPROFILE\src" | Out-Null
+gh repo clone theamazingfedex/claude-skill-store "$env:USERPROFILE\src\claude-skill-store"
+Set-Location "$env:USERPROFILE\src\claude-skill-store"
+
+# 2. Install the CLI (editable, so `git pull` updates it), plus the pinned builder
+py -3 -m pip install --user -e .
+py -3 -m pip install --user skill-seekers==3.1.3      # optional: only for `skill-store build`
+
+# 3. Make sure the console script is on PATH (pip prints a warning if it isn't)
+skill-store --help
+# If not found: add the user Scripts dir, e.g.
+#   $s = py -3 -c "import sysconfig; print(sysconfig.get_path('scripts', 'nt_user'))"
+#   [Environment]::SetEnvironmentVariable('Path', "$env:Path;$s", 'User')   # then open a new terminal
+# Without PATH changes you can always use:  py -3 -m skillstore --help
+```
+
+Prefer isolation? `pipx install -e .`, then `pipx inject <package> skill-seekers==3.1.3`. Use the
+package name from `pyproject.toml` / `pipx list`.
+
+### Linux (bash)
+
+```bash
+# 1. Clone
+mkdir -p ~/src
+gh repo clone theamazingfedex/claude-skill-store ~/src/claude-skill-store   # or: git clone git@github.com:theamazingfedex/claude-skill-store.git
+cd ~/src/claude-skill-store
+
+# 2. Install the CLI (editable) plus the pinned builder
+python3 -m pip install --user -e .
+python3 -m pip install --user skill-seekers==3.1.3     # optional: only for `skill-store build`
+# On distros with an "externally managed" system Python (PEP 668), use pipx or a venv instead:
+#   pipx install -e . && pipx inject <package> skill-seekers==3.1.3
+
+# 3. Check it is on PATH (~/.local/bin for --user installs)
+skill-store --help || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+chmod +x hooks/*.sh
+```
+
+macOS works like Linux.
+
+## Initialise the store
+
+```sh
+skill-store init          # creates ~/.skill-store/{skills,build} and an empty store.json. Idempotent.
+skill-store status
+```
+
+To put the store somewhere else, set `SKILL_STORE_HOME`, or pass `--store PATH` to any command.
+Set it **persistently** so Claude Code's hooks see the same value:
+
+```powershell
+[Environment]::SetEnvironmentVariable('SKILL_STORE_HOME', 'D:\skill-store', 'User')   # Windows, new terminals
+```
+```bash
+echo 'export SKILL_STORE_HOME="$HOME/.skill-store"' >> ~/.bashrc                    # Linux
+```
+
+The store is **not** a git repo and should not be put in one.
+
+## Set up a project: manifest and `.gitignore`
+
+From the project root:
+
+```sh
+skill-store init-project
+```
+
+This creates two files. **Commit both**:
+
+- `.claude/skills.manifest.json`, the skills this project links:
+
+  ```json
+  { "version": 1, "cap": 8, "skills": [] }
+  ```
+
+  `cap` is optional (default 8). `link`/`unlink` edit the list for you.
+
+- `.claude/skills/.gitignore`, which keeps links out of git:
+
+  ```gitignore
+  *
+  !.gitignore
+  ```
+
+  Both reasons matter. **Git follows junctions**: without this file, `git add -A` stages the
+  store's files as regular files (verified on Windows), and on Linux a committed symlink is
+  meaningless on other machines. The committed file also guarantees `.claude/skills/` **exists at
+  session start**, which Claude Code needs in order to pick up links added later in the session.
+
+Then add the unlink-safety section to the project's `CLAUDE.md`. Copy
+[`snippets/CLAUDE.skill-store.md`](snippets/CLAUDE.skill-store.md) (see
+[Unlink safety](#unlink-safety-hard-rule)).
+
+Full field reference: [docs/schemas.md](docs/schemas.md).
+
+## Build a skill
+
+```sh
+skill-store build <name> --recipe path/to/recipe.json     # scrape + post-process + register
+skill-store build <name> --recipe path/to/recipe.json --skip-scrape   # rebuild from cached pages
+skill-store postprocess <name>                            # re-run only the post-processor
+skill-store check <name>                                  # admission rules; non-zero exit on failure
+```
+
+`build` runs skill-seekers **3.1.3** with `--enhance-level 0` in `~/.skill-store/build/<name>/`.
+The post-processor then writes or validates a real **quoted** description, splits oversized
+references at headings with a TOC, and drops junk (e.g. `quality_report.json`). Finally it
+validates the result (strict YAML parse, `claude plugin validate` if available, `check`) and
+registers it in `store.json` with `approved: false`. See [`examples/`](examples/) for a recipe.
+
+Read [docs/build-recipe.md](docs/build-recipe.md) before writing a recipe. skill-seekers 3.1.3 has
+about a dozen pitfalls: unquoted descriptions, `--output` ignored, the unified docs route that
+silently produces no references, a crashing GitHub route, and more. **Always hand-write the
+description.** The generated ones don't trigger.
+
+Never use `skill-seekers install-agent` for the store: it copies into a hard-coded `~/.claude/skills/`.
+
+## Approve a skill
+
+```sh
+skill-store approve <name>
+```
+
+Approval is **your** explicit decision and is recorded in `store.json`. It is needed once per skill:
+
+- linking a never-approved skill fails, telling you to run `approve`;
+- `sync` reports unapproved manifest entries and doesn't link them;
+- re-linking a skill that was approved before (e.g. after it was pruned) is automatic.
+
+Agents and automation may build skills freely, but should ask you (e.g. through the orchestrator)
+before anything new is approved.
+
+## Link, unlink, sync, status
+
+```sh
+skill-store link <name>      # must exist, pass `check`, and be approved; adds to manifest, creates link, enforces cap
+skill-store unlink <name>    # removes ONLY the link (never the store copy), removes from manifest
+skill-store sync             # make links match the manifest; idempotent, safe to run any time
+skill-store status           # store skills, approval, linked here?, last used, cap usage
+```
+
+All commands accept `--store PATH` and `--project PATH`, and `--json` where it makes sense. The
+project is resolved from `--project`, then `CLAUDE_PROJECT_DIR`, then the git toplevel of the cwd,
+then the cwd.
+
+What `sync` does:
+
+- creates missing links for **approved** manifest entries;
+- removes links that point **into the store** but are no longer in the manifest;
+- leaves real directories and links pointing elsewhere alone;
+- enforces the cap.
+
+Run it after `git pull` changes a manifest, and in every new checkout or worktree. The
+[hooks](#enable-the-hooks-usage-tracking-and-session-start-sync) do this for you at session start.
+
+Under the hood: Windows creates an NTFS **junction** (like `New-Item -ItemType Junction` /
+`mklink /J`), and Linux/macOS an ordinary **symlink** (`ln -s`).
+
+## Cap and pruning
+
+- Each project links at most **8** domain skills by default. Override it with `"cap": N` in the manifest.
+- `link` past the cap **unlinks the least recently used** linked skill (from `usage.jsonl` /
+  `last_used`) and tells you which. The skill stays in the store and stays approved, so it can be
+  re-linked at any time.
+- `skill-store prune [--cap N]` unlinks LRU skills down to the cap, on demand. There is **no**
+  scheduled pruning.
+
+LRU only works if the [usage hook](#enable-the-hooks-usage-tracking-and-session-start-sync) is
+installed. Typing `/skill-name` yourself bypasses the Skill tool, so those uses aren't counted.
+
+## Enable the hooks (usage tracking and session-start sync)
+
+Two Claude Code hooks connect the store to sessions:
+
+| Hook | Matcher | Runs | Purpose |
+|---|---|---|---|
+| `PostToolUse` | `Skill` | `skill-store log-usage` | append `{skill, session, project, time}` to `usage.jsonl`, update `last_used` |
+| `SessionStart` | (all) | `skill-store sync --quiet` | create this checkout's links before work starts |
+
+Both must never get in the way: `log-usage` always exits 0, and `sync --quiet` prints nothing on
+success, because SessionStart output is added to Claude's context. The snippets follow the
+[Claude Code hooks reference](https://code.claude.com/docs/en/hooks). Merge them into your
+existing `hooks` object instead of replacing it. Check the result with `/hooks` inside Claude Code.
+
+**Recommended setup: user-level, via the wrapper scripts.** These live in `~/.claude/settings.json`,
+so they cover every project and every AO worker. The wrappers in [`hooks/`](hooks/) find
+`skill-store` even if it isn't on the hook's PATH (`SKILL_STORE_CMD`, then PATH, then
+`python -m skillstore`), skip `sync` in projects without a manifest, and always exit 0.
+
+### Windows
+
+Merge [`snippets/settings.windows.json`](snippets/settings.windows.json) into
+`%USERPROFILE%\.claude\settings.json` and replace `C:/Users/YOU/src/claude-skill-store` with your
+clone path. It uses the exec form (`"command": "powershell.exe"` + `"args"`), so it works whether or
+not Git Bash is installed, and no quoting is needed:
+
+```json
+{
+  "type": "command",
+  "command": "powershell.exe",
+  "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+           "C:/Users/YOU/src/claude-skill-store/hooks/skill-store-hook.ps1", "log-usage"],
+  "timeout": 10
+}
+```
+
+### Linux
+
+Merge [`snippets/settings.linux.json`](snippets/settings.linux.json) into `~/.claude/settings.json`
+(adjust the path if you didn't clone to `~/src`) and make the scripts executable
+(`chmod +x hooks/*.sh`):
+
+```json
+{
+  "type": "command",
+  "command": "\"$HOME/src/claude-skill-store/hooks/skill-store-hook.sh\" log-usage",
+  "timeout": 10
+}
+```
+
+### Alternatives
+
+- **Direct commands** (no wrapper), if `skill-store` is reliably on PATH for Claude Code. These work
+  on both OSes:
+  - [`snippets/settings.user.json`](snippets/settings.user.json): user-level usage hook;
+  - [`snippets/settings.project.json`](snippets/settings.project.json): a `SessionStart` sync to
+    **commit** into a project's `.claude/settings.json`, so everyone who clones it gets the sync.
+- If you set a custom `SKILL_STORE_HOME`, make sure the environment Claude Code is launched from
+  has it (user environment variable / shell profile). Hooks inherit Claude Code's environment.
+
+### AO worktrees
+
+New worktrees start without links. Besides the SessionStart hook, an AO project can run
+`skill-store sync` as a `--post-create` step. As a `--pre-remove` step it can run
+[`hooks/unlink-all.ps1`](hooks/unlink-all.ps1) / [`hooks/unlink-all.sh`](hooks/unlink-all.sh),
+which remove the worktree's store links non-recursively before AO deletes the directory. See
+[snippets/ao-worktree-setup.md](snippets/ao-worktree-setup.md).
+
+## Unlink safety (hard rule)
+
+> **Unlinking removes only the link. Never run a recursive delete on anything under
+> `.claude/skills/`.** The entries there are junctions/symlinks into the shared store, and a
+> recursive delete through one destroys the store copy for every project on the machine.
+
+- Use `skill-store unlink` / `sync` / `prune`. They check that the entry is a link, refuse real
+  directories, and remove the link non-recursively (`os.rmdir`/`os.unlink`).
+- By hand, one link at a time:
+  - Windows: `cmd /c rmdir .claude\skills\<name>` or
+    `[System.IO.Directory]::Delete("$PWD\.claude\skills\<name>", $false)`. **Never**
+    `Remove-Item -Recurse` and never `rmdir /s`.
+  - Linux/macOS: `rm .claude/skills/<name>` or `unlink .claude/skills/<name>`. **Never** `rm -r`.
+- **Git Bash trap:** `rm -rf .claude/skills/<name>/` **with a trailing slash wipes the store's
+  files** and leaves the link behind (verified). Without the slash it removes only the link, but
+  don't rely on remembering that.
+- **Never use the vercel `skills` CLI `remove`** (`npx skills remove …`). It has no unlink, and
+  `remove` deletes the canonical copy too. Leave links it created (e.g.
+  `~/.claude/skills/{find-skills,wayfinder}` → `~/.agents/skills/`) alone; this tool never touches them.
+- Before deleting a checkout or worktree that has links, run `hooks/unlink-all.(ps1|sh)` (or
+  `skill-store unlink` for each skill) first.
+
+Put this rule in every project that uses the store. Copy
+[`snippets/CLAUDE.skill-store.md`](snippets/CLAUDE.skill-store.md) into its `CLAUDE.md`, so agents
+working there follow it too.
+
+## Verify in a fresh Claude Code session
+
+Claude Code documents that skill dirs may be symlinks and that changes under an existing
+`.claude/skills/` are picked up mid-session. These parts **have not yet been observed in a
+fresh session** (known unverified behaviour):
+
+1. a project-scope junction/symlink skill is listed and loads;
+2. a link added mid-session appears without a restart;
+3. a link removed mid-session disappears;
+4. edits inside the link target (the store copy) are picked up;
+5. cross-volume junctions (store on `C:`, project on `E:`). These were tested at the filesystem
+   level only (create, read and write through, non-recursive removal all work).
+
+Run the ~10-minute manual checklist in [docs/verification.md](docs/verification.md) once per machine.
+It uses a scratch store (`SKILL_STORE_HOME`) and a scratch project with two tiny test skills. In
+short:
+
+```sh
+skill-store link verify-alpha    # then start `claude` in the project: /skills lists it, asking triggers it
+skill-store link verify-beta     # with the session still open: does it appear without a restart?
+skill-store unlink verify-alpha  # does it disappear? is the store copy still there?
+# edit the store copy of verify-alpha's SKILL.md: is the change picked up?
+```
+
+Report the results (✅/❌ per step, Claude Code version, OS) so this section can be updated.
+
+## Troubleshooting
+
+**`skill-store` not found (terminal or hooks).** The user Scripts dir isn't on PATH (Windows
+`py -3 -c "import sysconfig; print(sysconfig.get_path('scripts','nt_user'))"`, Linux `~/.local/bin`).
+Fix PATH, or use the wrapper hooks and set `SKILL_STORE_CMD` to the full path of the console
+script. `python -m skillstore` always works. Claude Code inherits its environment from where it
+was launched, so restart it after changing PATH.
+
+**Windows: "A required privilege is not held by the client" / "You do not have sufficient
+privilege".** That is a *symlink* being created. Symlinks need Developer Mode or an elevated shell;
+junctions don't. `skill-store` uses junctions on Windows. If you made links by hand, use
+`New-Item -ItemType Junction` or `mklink /J`, not `mklink /D`. Turning on Developer Mode isn't
+required for anything here.
+
+**Windows: store and project on different drives.** Junctions support any **local** volume
+(e.g. store on `C:`, repo on `E:`). Creating, reading and writing through such a junction and
+removing it non-recursively were tested and work. Claude Code's discovery across volumes is part of
+the [verification checklist](docs/verification.md). Junctions **cannot** point at network shares
+or mapped network drives, so keep the store on a local disk. A junction stores an absolute path: if
+you move the store, unlink everywhere first, then `sync` again with the new `SKILL_STORE_HOME`.
+
+**Git wants to commit files under `.claude/skills/`.** The `.claude/skills/.gitignore` is missing
+or was edited. Run `skill-store init-project` (or `sync`) to restore it. If store files are already
+staged, unstage them with `git rm -r --cached .claude/skills/<name>`. `--cached` touches only the
+index and leaves the working tree and the store alone. If they were committed, remove them from
+history before pushing: they are third-party content.
+
+**A committed symlink checked out as a small text file** (Windows without symlink privilege). Links
+must never be committed. Delete that *file*, make sure the `.gitignore` is in place, and run `sync`.
+
+**A linked skill doesn't show up, or doesn't trigger.**
+- `skill-store status`: is it linked in *this* checkout? Approved? Run `skill-store sync`.
+- Did `.claude/skills/` exist when the session started? If not, Claude Code isn't watching it:
+  run `/reload-skills` (the committed `.gitignore` prevents this).
+- **Listing budget:** if the listing overflows, descriptions of rarely used skills are dropped.
+  Run `/doctor` (setup check) and `/skill-doctor` (per-skill cost vs use, v2.1.252+). To free
+  budget, link fewer skills, keep descriptions short and use-case-first, or set skills you rarely
+  need via `skillOverrides` in `settings.json`:
+
+  ```json
+  { "skillOverrides": { "docx": "name-only", "pptx": "name-only", "some-skill": "off" } }
+  ```
+
+  Values: `on` (default), `name-only` (listed without description), `user-invocable-only` (hidden
+  from Claude, still in the `/` menu), `off`. The `/skills` menu can set them for you (Space to
+  cycle, Esc saves to `.claude/settings.local.json`). Plugin skills aren't affected. As a last
+  resort, raise `skillListingBudgetFraction` (default `0.01`).
+- **YAML errors / empty metadata:** the description is probably unquoted with a `: ` inside. Run
+  `skill-store check <name>` and `skill-store postprocess <name>`.
+
+**`link` refuses.** It requires the skill to exist in the store, pass `check`, and be approved.
+The error says which. Run `skill-store check <name>`, then `skill-store approve <name>` (your decision).
+
+**Usage isn't being logged / LRU looks wrong.** Check `/hooks` in Claude Code, and run with
+`claude --debug` to see hook output. Only Skill **tool** calls are logged: typing `/skill-name`
+bypasses the tool. Test the hook by hand:
+`echo '{"tool_name":"Skill","tool_input":{"skill":"x"},"session_id":"t"}' | skill-store log-usage`
+(use a scratch `SKILL_STORE_HOME`).
+
+**SessionStart sync prints into the conversation.** Plain-text SessionStart output is added to
+Claude's context. Use `sync --quiet` (the snippets do).
+
+**PowerShell refuses to run the hook script** (execution policy). The snippets pass
+`-ExecutionPolicy Bypass` for that one process. Running `Unblock-File hooks\*.ps1` also helps if
+the files came from a download.
+
+**Something deleted store files.** Almost always a recursive delete through a link (see
+[Unlink safety](#unlink-safety-hard-rule)). Rebuild with `skill-store build <name> --skip-scrape`:
+the raw pages in `build/<name>/` make this cheap, unless they were deleted too.
+
+## Command reference
+
+| Command | Does |
+|---|---|
+| `init` | create the store layout and an empty `store.json` (idempotent) |
+| `init-project` | create `.claude/skills/.gitignore` and an empty manifest if missing |
+| `build <name> --recipe FILE [--skip-scrape]` | skill-seekers 3.1.3 build + post-process + register (unapproved) |
+| `postprocess <name>` | re-run only the post-processor |
+| `check <name\|path>` | admission rules; non-zero exit on failure |
+| `approve <name>` | record your approval in `store.json` |
+| `link <name>` | approved + checked only; add to manifest, link, enforce cap (LRU unlink, reported) |
+| `unlink <name>` | remove the link only; remove from manifest |
+| `sync [--quiet]` | make links match the manifest; idempotent; never fails a session start |
+| `status` | skills, approval, linked here, last used, cap usage |
+| `prune [--cap N]` | unlink LRU skills down to the cap (on demand only) |
+| `log-usage` | hook entry point: read hook JSON on stdin, append to `usage.jsonl`; always exits 0 |
+
+Global flags: `--store PATH`, `--project PATH`, `--json`. `skill-store <command> --help` is authoritative.
+
+## Repo layout
+
+| Path | Contents |
+|---|---|
+| `skillstore/` | the Python CLI (`skill-store`, `python -m skillstore`) |
+| `bin/` | thin `skill-store.ps1` / `.sh` / `.cmd` wrappers |
+| `schemas/`, `examples/` | JSON Schemas; example manifest, `store.json`, build recipe |
+| `tests/` | tests for link/unlink/sync/prune safety (`pytest`) |
+| `hooks/` | Claude Code hook wrappers and `unlink-all` (AO pre-remove) scripts |
+| `snippets/` | `settings.json` snippets (Windows, Linux, direct), CLAUDE.md safety section, AO worktree setup |
+| `docs/` | [design rationale](docs/design.md), [build recipe](docs/build-recipe.md), [schemas](docs/schemas.md), [verification checklist](docs/verification.md) |
+
+Contributors: tests and development must **never** touch the real `~/.claude`, `~/.agents` or
+`~/.skill-store`. Use temp dirs and `SKILL_STORE_HOME` / `--store`.
+
+## License
+
+No LICENSE file is included yet. That choice is left to the repository owner, so until one is
+added, all rights are reserved by default.
