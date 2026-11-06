@@ -74,8 +74,9 @@ licenses (e.g. CC BY, or a vendor's copyright).
   worktree **before** Claude Code starts, for example from a worktree-creation hook such as an AO
   `--post-create` step, or from a launch wrapper. A `SessionStart` hook can run it too, but only as a
   backstop: a session scans its skills before that hook runs. Links the hook creates during startup
-  appeared from turn 2 in `claude -p` (2.1.318), and **not at all until `/reload-skills`** in the
-  interactive TUI (2.1.319). Links created later in a session are picked up normally.
+  appeared in `claude -p` only from the first turn that started after the file watcher saw them
+  (turn 2 or later), and **not at all until `/reload-skills`** in the interactive TUI. This was seen
+  on Windows (2.1.319) and Linux (2.1.318). Links created later in a session are picked up normally.
 
 ### Unlink safety (standing rule)
 

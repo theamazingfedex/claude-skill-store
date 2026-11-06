@@ -16,19 +16,22 @@ This checklist confirms that Claude Code really picks up skills linked from the 
 |---|---|---|---|
 | 2026-11-06 | Windows 10 Pro 19045 | 2.1.318 | `claude -p`, one continuous session for the mid-session steps |
 | 2026-11-06 | Windows 10 Pro 19045 | 2.1.319 | interactive TUI (step 6) |
+| 2026-11-06 | Kali Linux 2026.2 on WSL2 (kernel 6.18.40.1) | 2.1.318 | `claude -p`, one continuous session for the mid-session steps; `-p` step 6 |
+| 2026-11-06 | Kali Linux 2026.2 on WSL2 (kernel 6.18.40.1) | 2.1.318 / 2.1.319 | interactive TUI (step 6: SessionStart case on 2.1.318, sync-before-launch control on 2.1.319); step 7 on 2.1.319 |
 
-| # | Step | Result |
-|---|---|---|
-| 1 | Project-scope junction skill discovered and invoked | ✅ |
-| 2 | Link added mid-session | ✅ picked up on the next turn; the model is told (a `skill_listing` delta) |
-| 3 | Link removed mid-session | ✅ for Claude Code (the skill is gone from the registry; invoking it gives `Unknown skill`). ⚠️ **the model is not told**, so if asked it still claims the skill is available |
-| 4 | Edit inside the store copy | ✅ re-invoking it loads the new body |
-| 5 | Cross-volume (store `C:`, project `E:`) | ✅ |
-| 6 | Fresh worktree via `SessionStart` sync | ❌ interactive / ⚠️ `-p`. The hook creates the links within a second of launch, but the session has already scanned its skills. **Interactive (2.1.319): not picked up at all** (still missing on turn 2, ~26 s in) until `/reload-skills` or a new session. `-p` (2.1.318): available from turn 2. Links present **before** launch are found on turn 1 |
-| 7 | `/skill-doctor` per-skill cost | ✅ (~40 tokens of listing per test skill). `/doctor` showed no listing estimate in `-p` mode (interactive not checked) |
-| — | `PostToolUse` `Skill` usage hook | ✅ exactly one `usage.jsonl` line per successful Skill call; none for a failed call |
+| # | Step | Windows 10 (junctions) | Linux, WSL2 Kali (symlinks) |
+|---|---|---|---|
+| 1 | Project-scope linked skill discovered and invoked | ✅ | ✅ |
+| 2 | Link added mid-session | ✅ next turn; the model is told (a `skill_listing` delta) | ✅ next turn, same delta; the watcher fires immediately |
+| 3 | Link removed mid-session | ✅ gone from the registry; invoking it gives `Unknown skill`. ⚠️ **the model is not told**, so if asked it still claims the skill is available | ✅ same: `Unknown skill`, store copy kept. ⚠️ no removal delta for the model |
+| 4 | Edit inside the store copy | ✅ re-invoking it loads the new body | ✅ |
+| 5 | Cross-volume | ✅ store `C:`, project `E:` | n/a. Analogue: project on drvfs (`/mnt/c`), store on ext4 ✅ (Windows sees that symlink as a junction) |
+| 6 | Fresh worktree via `SessionStart` sync | ❌ interactive (2.1.319): not picked up at all (still missing on turn 2, ~26 s in) until `/reload-skills` or a new session. ⚠️ `-p` (2.1.318): from turn 2 | ❌ interactive (2.1.318): still missing on turn 2 (~1 min in); ✅ after `/reload-skills`. ⚠️ `-p` (2.1.318): from the first turn that *starts* after Claude Code's file watcher sees the new links (a few seconds after launch; ~4.4 s on Linux), so turn 2 or later (turn 3 in a fast run) |
+| 6 | Control: `skill-store sync` before launch | ✅ turn 1 | ✅ turn 1, interactive and `-p` |
+| 7 | `/skill-doctor` per-skill cost | ✅ ~40 tokens of listing per test skill. `/doctor`: no listing estimate in `-p` | ✅ ~40 tokens per test skill (2.1.319). In the interactive TUI it now opens Plugins → **Stats**. `/doctor`: an agentic health check, no estimate, in both modes |
+| — | `PostToolUse` `Skill` usage hook | ✅ one `usage.jsonl` line per successful Skill call; none for a failed call | ✅ same, in both `-p` and the TUI |
 
-`/reload-skills` and restarts were never needed for steps 1–5. Links created *after* startup (step 2)
+On both systems, `/reload-skills` and restarts were never needed for steps 1–5. Links created *after* startup (step 2)
 are picked up in the interactive TUI too. Only links created by the `SessionStart` hook *during*
 startup are missed.
 
@@ -53,6 +56,10 @@ It takes about 15 minutes and uses a throwaway store and project. Your real stor
 `.claude/settings.json`**. The `PostToolUse` usage hook works at project level too. The Claude Code
 session itself uses your normal login, so Claude Code writes its usual transcripts under
 `~/.claude/projects/`.
+
+Claude Code can **auto-update in the background** during a run (a fresh install went from 2.1.318 to
+2.1.319 mid-run). Record `claude --version` for each session, or launch the test sessions with
+`DISABLE_AUTOUPDATER=1` in the environment.
 
 The hooks below use the **exec form** with the full path of `skill-store` and an explicit
 `--store`. So they work even when `skill-store` isn't on Claude Code's PATH (e.g. a venv install) and
@@ -97,7 +104,11 @@ Linux (bash):
 
 ```bash
 V=/tmp/ss-verify; store=$V/store; proj=$V/proj
-python3 -m venv $V/venv && $V/venv/bin/pip install -q -e ~/src/claude-skill-store
+python3 -m venv $V/venv || {   # minimal Debian/Ubuntu/Kali: no ensurepip -> venv without pip + get-pip
+  python3 -m venv --without-pip $V/venv &&
+  $V/venv/bin/python -c 'import urllib.request; urllib.request.urlretrieve("https://bootstrap.pypa.io/get-pip.py", "/tmp/get-pip.py")' &&
+  $V/venv/bin/python /tmp/get-pip.py -q; }
+$V/venv/bin/pip install -q -e ~/src/claude-skill-store
 exe=$V/venv/bin/skill-store; ss() { "$exe" --store "$store" "$@"; }
 mkdir -p "$proj" && cd "$proj" && git init -q && ss init && ss init-project
 for n in verify-alpha verify-beta; do
@@ -129,8 +140,9 @@ in PowerShell, so `export` it again there, or pass `--store` explicitly (the `ss
 
 Start `claude` in `$proj`. The interactive TUI asks whether you trust the folder, with **"No, exit"
 selected by default**: choose to trust it. Project hooks (the usage hook and the SessionStart sync)
-run only after that. The same prompt appears for the worktree in step 6 and the `E:` project in
-step 5. In `-p` mode, project hooks ran without a prompt.
+run only after that. Expect the prompt again for a new folder, such as the `E:` project in step 5.
+Once one worktree of a repository is trusted, other worktrees of the same repository may **not** be
+prompted (seen on Linux). In `-p` mode, project hooks ran without a prompt.
 
 - [ ] `/skills` lists **verify-alpha** (and not verify-beta).
 - [ ] Ask *"What does zorblax-verify-alpha mean?"*. Claude invokes the skill and answers "the store link works".
@@ -174,6 +186,12 @@ Start `claude` in `$p2`.
 
 - [ ] verify-alpha is listed and works.
 
+Optional Linux/WSL analogue: put a project on the Windows drive (`/mnt/c/...`, drvfs) and keep the
+store on ext4. `ss --project <that dir> init-project`, `ss --project <that dir> link verify-alpha`,
+copy the settings file, then start `claude` there. Windows sees that symlink as a **junction**: run
+`ss unlink --all --project <that dir>` from WSL before deleting the folder from either side. Also
+include that dir in the clean-up checks below.
+
 ### 6. Fresh worktree / checkout
 
 ```sh
@@ -185,8 +203,8 @@ git -C "$proj" worktree add ../proj-wt
 `.claude/skills/` in `../proj-wt` now contains only `.gitignore`. Start `claude` there.
 
 - [ ] After the session starts, the links exist (the `SessionStart` hook created them).
-- [ ] Ask about zorblax-verify-beta: expected **not** known yet (interactive 2.1.319: not on turn 2
-      either; `-p` 2.1.318: known from turn 2).
+- [ ] Ask about zorblax-verify-beta: expected **not** known yet. Interactive: still not on turn 2
+      (2.1.318 on Linux, 2.1.319 on Windows). `-p`: known from the first turn that *starts* after Claude Code's file watcher sees the new links (a few seconds after launch; ~4.4 s on Linux), so turn 2 or later.
 - [ ] Run `/reload-skills`, ask again: now it works.
 - [ ] `git -C ../proj-wt status` shows nothing under `.claude/skills/`.
 
@@ -204,10 +222,11 @@ Start `claude` in `../proj-wt2` and trust the folder.
 
 ### 7. Listing cost
 
-- [ ] `/skill-doctor` lists verify-alpha and verify-beta with their listing cost and use.
-- [ ] `/doctor` may show a skill-listing estimate **in an interactive session only**; this varies by
-      version. With 2.1.318 in `-p` mode it ran an agentic health check and showed no estimate, so
-      rely on `/skill-doctor`.
+- [ ] `/skill-doctor` lists verify-alpha and verify-beta with their listing cost and use. In newer
+      interactive versions (2.1.319) it opens the Plugins panel's **Stats** tab instead, with the
+      same rows. `claude -p /skill-doctor` still prints the table.
+- [ ] Don't rely on `/doctor` for this: on 2.1.318/2.1.319 it is an agentic health check and showed
+      no skill-listing estimate, interactive or `-p`.
 
 From Git Bash, prefix slash commands passed to `claude -p` with `MSYS_NO_PATHCONV=1`, e.g.
 `MSYS_NO_PATHCONV=1 claude -p "/doctor"` or `MSYS_NO_PATHCONV=1 claude -p /skill-doctor`. Otherwise
