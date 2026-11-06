@@ -146,3 +146,32 @@ def test_log_usage_after_global_options(env, monkeypatch, capsys):
     assert [r["skill"] for r in _usage(env)] == ["alpha", "alpha"]
     rc = cli.main(["--store", str(env.store_root), "log-usage", "--bogus"])
     assert rc == 0
+
+
+def test_utf8_bom_on_stdin_is_accepted(env, monkeypatch, capsys):
+    """Hook stdin starting with a UTF-8 BOM (e.g. from PowerShell) must still be logged."""
+    env.store.init()
+    payload = json.dumps({"tool_name": "Skill", "tool_input": {"skill": "x"}})
+    rc, _, _ = _run(monkeypatch, capsys, "\ufeff" + payload)  # text stdin with a decoded BOM
+    assert rc == 0
+
+    class _BytesStdin(io.StringIO):
+        def __init__(self, data: bytes):
+            super().__init__("")
+            self.buffer = io.BytesIO(data)
+
+    raw = b"\xef\xbb\xbf" + json.dumps({"tool_name": "Skill",
+                                        "tool_input": {"skill": "caf\u00e9-x"}}).encode("utf-8")
+    monkeypatch.setattr(sys, "stdin", _BytesStdin(raw))
+    assert cli.main(["log-usage"]) == 0
+    assert [r["skill"] for r in _usage(env)] == ["x", "caf\u00e9-x"]
+
+
+def test_utf8_bom_subprocess(env, tmp_path):
+    env.store.init()
+    raw = b"\xef\xbb\xbf" + json.dumps({"tool_name": "Skill", "tool_input": {"skill": "x"}}).encode()
+    res = subprocess.run([sys.executable, "-m", "skillstore", "--store", str(env.store_root), "log-usage"],
+                         input=raw, capture_output=True, env=dict(os.environ, PYTHONPATH=str(ROOT)),
+                         cwd=str(tmp_path))
+    assert res.returncode == 0
+    assert [r["skill"] for r in _usage(env)] == ["x"]
