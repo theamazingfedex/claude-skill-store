@@ -528,6 +528,35 @@ Global flags (before or after the command): `--store PATH`, `--project PATH`, `-
 Exit codes: `0` = ok, `1` = refused or failed, `2` = usage error. Exceptions: `log-usage` and
 `sync --quiet` always exit 0, and plain `sync` exits 1 only if an operation errored.
 
+## Running tests
+
+Tests run locally; hosted CI is optional and manual-only. Each script creates (or reuses) a
+venv in the system temp dir (not the repo), runs `pip install -e ".[test]"` and then pytest, and
+exits non-zero if anything fails. The tests redirect `HOME`/`USERPROFILE`/`SKILL_STORE_HOME`
+to temp dirs and never touch the real `~/.claude`, `~/.agents` or `~/.skill-store`.
+
+Windows (PowerShell), optionally also inside WSL:
+
+```powershell
+.\scripts\test-local.ps1                     # Windows only
+.\scripts\test-local.ps1 -Wsl                # Windows, then WSL (default distro kali-linux)
+.\scripts\test-local.ps1 -Wsl -WslDistro Ubuntu -OtherVolume E:\tmp
+```
+
+Linux, or from a WSL shell:
+
+```bash
+sh scripts/test-local.sh
+sh scripts/test-local.sh --other-volume /mnt/c/Users/<you>/AppData/Local/Temp -- -k sync
+```
+
+- `-OtherVolume` / `--other-volume` enables the opt-in cross-volume link tests. Give a writable
+  directory on a different drive or filesystem than the temp dir.
+- In WSL, a checkout under `/mnt/<drive>/` is copied to a Linux temp dir first.
+- If the distro's Python has no `ensurepip`, the venv is created `--without-pip` and pip is
+  bootstrapped from `get-pip.py` (no sudo).
+- Extra arguments go to pytest (after `--` for the `.sh` script).
+
 ## Repo layout
 
 | Path | Contents |
@@ -536,7 +565,8 @@ Exit codes: `0` = ok, `1` = refused or failed, `2` = usage error. Exceptions: `l
 | `bin/` | thin `skill-store.ps1` / `.sh` / `.cmd` wrappers |
 | `schemas/`, `examples/` | JSON Schemas (manifest, store, usage record, recipe); example manifest, `store.json`, recipes |
 | `tests/` | tests for link/unlink/sync/prune safety and the build pipeline: `pip install -e ".[test]"` then `pytest` |
-| `.github/workflows/` | CI: ubuntu + windows × Python 3.10 / 3.12 |
+| `.github/workflows/` | CI (ubuntu + windows × Python 3.10 / 3.12), **manual-only** (`workflow_dispatch`): never runs on push or PR and is never required; running it uses the account's free included Actions minutes |
+| `scripts/` | local test runners: `test-local.ps1` (Windows, `-Wsl` for WSL too) and `test-local.sh` (Linux/WSL); see [Running tests](#running-tests) |
 | `hooks/` | Claude Code hook wrappers (`log-usage`, `sync --quiet`) |
 | `snippets/` | `settings.json` snippets (Windows, Linux, direct), CLAUDE.md safety section, AO worktree setup |
 | `docs/` | [design rationale](docs/design.md), [build recipe](docs/build-recipe.md), [schemas](docs/schemas.md), [verification checklist](docs/verification.md) |

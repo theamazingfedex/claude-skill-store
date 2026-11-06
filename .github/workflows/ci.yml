@@ -1,9 +1,13 @@
+# Manual-only CI (opt-in). Nothing here runs automatically: there are no push or
+# pull_request triggers, and this workflow is never a required check for merging.
+# Starting it (Actions tab -> CI -> "Run workflow", or `gh workflow run ci.yml`) uses the
+# account's free included GitHub Actions minutes; Windows runners count 2x per minute.
+# The normal way to test is locally: scripts/test-local.ps1 (Windows, optionally -Wsl)
+# or scripts/test-local.sh (Linux/WSL). See "Running tests" in the README.
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
