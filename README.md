@@ -445,8 +445,10 @@ required for anything here.
 
 **Windows: store and project on different drives.** Junctions support any **local** volume
 (e.g. store on `C:`, repo on `E:`). `link`, reading and writing through the junction, `sync` and
-`unlink` were tested in both directions and work. Claude Code's discovery across volumes is part of
-the [verification checklist](docs/verification.md). Junctions **cannot** point at network shares
+`unlink` were tested in both directions and work. Claude Code discovers and invokes skills through
+such a cross-drive junction too: this was verified with Claude Code 2.1.318 on Windows 10 (store on
+`C:`, project on `E:`; see [docs/verification.md](docs/verification.md#last-verified)). Junctions
+**cannot** point at network shares
 or mapped network drives, so keep the store on a local disk. A junction stores an absolute path: if
 you move the store, unlink everywhere first, then `sync` again with the new `SKILL_STORE_HOME`.
 
