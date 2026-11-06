@@ -187,8 +187,19 @@ git -C "$proj" worktree add ../proj-wt
 - [ ] Ask about zorblax-verify-beta: expected **not** known yet (interactive 2.1.319: not on turn 2
       either; `-p` 2.1.318: known from turn 2).
 - [ ] Run `/reload-skills`, ask again: now it works.
-- [ ] Control: `ss sync --project ../proj-wt` **before** starting `claude` in a fresh worktree → known on turn 1.
 - [ ] `git -C ../proj-wt status` shows nothing under `.claude/skills/`.
+
+Control: sync **before** launch, in a second, genuinely fresh worktree. `proj-wt` can't be used for
+this, because it already has its links by now.
+
+```sh
+git -C "$proj" worktree add ../proj-wt2
+ss sync --project "$V/proj-wt2"        # creates the links before Claude Code starts
+```
+
+Start `claude` in `../proj-wt2` and trust the folder.
+
+- [ ] Asking about zorblax-verify-beta works on the **first** turn, with no `/reload-skills`.
 
 ### 7. Listing cost
 
@@ -208,14 +219,21 @@ Unlink first, check that no links remain, then delete the scratch dirs. **Never*
 with a recursive delete while links exist: it would recurse into the store through them.
 
 ```powershell
-ss unlink --all --project "$V\proj-wt"; ss unlink --all --project $proj; ss unlink --all --project E:\ss-verify\proj
-git -C $proj worktree remove --force ..\proj-wt
+ss unlink --all --project "$V\proj-wt"; ss unlink --all --project "$V\proj-wt2"
+ss unlink --all --project $proj; ss unlink --all --project E:\ss-verify\proj
+git -C $proj worktree remove --force ..\proj-wt; git -C $proj worktree remove --force ..\proj-wt2
 Get-ChildItem -Recurse -Force $V, E:\ss-verify -Attributes ReparsePoint -ErrorAction SilentlyContinue | Select-Object FullName   # must print nothing
 Remove-Item -Recurse -Force $V, E:\ss-verify       # only if the line above printed nothing
 ```
 
-On Linux: `ss unlink --all --project` each project, `git worktree remove`, check with
-`find "$V" -type l`, then `rm -r "$V"`.
+Linux (bash):
+
+```bash
+ss unlink --all --project "$V/proj-wt"; ss unlink --all --project "$V/proj-wt2"; ss unlink --all --project "$proj"
+git -C "$proj" worktree remove --force ../proj-wt; git -C "$proj" worktree remove --force ../proj-wt2
+find "$V" -type l          # must print nothing
+rm -r "$V"                 # only if the line above printed nothing
+```
 
 ## Report the results
 
