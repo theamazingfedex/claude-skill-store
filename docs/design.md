@@ -119,7 +119,10 @@ These are enforced by `skill-store check` before linking. They are looser than t
 ### Usage tracking
 
 A `PostToolUse` hook with matcher `Skill` appends `{skill, session, project, time}` to
-`usage.jsonl` in the store and updates `last_used`. This covers AO workers and stays outside every
+`usage.jsonl` in the store. The hook only appends: it never rewrites `store.json`, so
+concurrent sessions can't lose each other's updates (or an `approve`). `usage.jsonl` is the source
+of truth for recency; `store.json` `last_used` is refreshed from it whenever a command saves
+`store.json`. This covers AO workers and stays outside every
 repo. Note that typing `/skill-name` directly bypasses the Skill tool and therefore the hook. Those
 invocations are not counted, which can make a skill you only invoke by hand look unused.
 
