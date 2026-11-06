@@ -438,8 +438,9 @@ working there follow it too.
 Verified on Windows 10 and on Linux (WSL2 Kali) with Claude Code 2.1.318/2.1.319 (details in
 [docs/verification.md](docs/verification.md#last-verified)):
 
-- ✅ a project-scope **junction** skill is discovered and invoked, including **cross-volume** (store
-  on `C:`, project on `E:`);
+- ✅ a project-scope **linked** skill (a junction on Windows, a symlink on Linux) is discovered and
+  invoked. On Windows that includes a **cross-volume** link (store on `C:`, project on `E:`); on
+  WSL it includes a project on `/mnt/c` with the store on the Linux filesystem;
 - ✅ a link **added** mid-session is picked up on the next turn, without a restart or `/reload-skills`;
 - ✅ an **edit** to the store copy is picked up when the skill is invoked again;
 - ✅ a link **removed** mid-session can no longer be invoked (`Unknown skill`). ⚠️ The model isn't
