@@ -12,7 +12,7 @@ Works on **Windows** (NTFS junctions, no admin or Developer Mode needed) and **L
 - [How it works](#how-it-works)
 - [Prerequisites](#prerequisites)
 - [Install](#install): [Windows](#windows-powershell) · [Linux](#linux-bash)
-- [Initialise the store](#initialise-the-store)
+- [Initialize the store](#initialize-the-store)
 - [Set up a project](#set-up-a-project-manifest-and-gitignore)
 - [Build a skill](#build-a-skill) · [Approve it](#approve-a-skill) · [Link, unlink, sync](#link-unlink-sync-status)
 - [Cap and pruning](#cap-and-pruning)
@@ -82,6 +82,7 @@ third-party text and must never end up in a project's git history.
 | [Claude Code](https://code.claude.com/docs) | recent (`/skill-doctor` needs v2.1.252+) | using the skills, hooks |
 | skill-seekers | **exactly 3.1.3** (installed by the `[build]` extra) | only `skill-store build` |
 | `gh` (GitHub CLI) | optional | cloning this private repo, reporting verification results |
+| [Agent Orchestrator (AO)](https://github.com/OrchestratorInc/agent-orchestrator) | optional, additional | running coding agents in parallel worktrees; see [AO worktrees](#ao-worktrees) |
 
 On Windows, nothing needs admin rights or Developer Mode: the tool uses directory **junctions**,
 not symlinks.
@@ -136,7 +137,7 @@ chmod +x hooks/*.sh
 
 macOS works like Linux.
 
-## Initialise the store
+## Initialize the store
 
 ```sh
 skill-store init          # creates ~/.skill-store/{skills,build}, store.json and usage.jsonl. Idempotent.

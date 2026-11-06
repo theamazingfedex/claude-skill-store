@@ -1,6 +1,6 @@
 """A stand-in for the skill-seekers 3.1.3 CLI used by the build tests (no network).
 
-Behaviour knobs via env vars:
+Behavior knobs via env vars:
   MOCK_SS_VERSION   version string to print for --version (default 3.1.3)
   MOCK_SS_NO_REFS   if set, write a skeleton SKILL.md with no references (bug 2 in 3.1.3)
   MOCK_SS_FAIL      if set, exit 1

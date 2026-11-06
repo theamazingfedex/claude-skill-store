@@ -1,4 +1,4 @@
-"""Operations behind the CLI commands. Each returns a JSON-serialisable result dict.
+"""Operations behind the CLI commands. Each returns a JSON-serializable result dict.
 
 Cap semantics (see README.md and docs/design.md):
 
