@@ -1,4 +1,4 @@
-<!-- Paste this section into a project's CLAUDE.md (or a pipeline/worker rules file). -->
+<!-- Paste this section into a project's CLAUDE.md (or any agent-instructions file). -->
 ## Skills store: unlink safety (hard rule)
 
 Entries under `.claude/skills/` are **links** (NTFS junctions on Windows, symlinks on

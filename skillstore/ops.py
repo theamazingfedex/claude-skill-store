@@ -1,6 +1,6 @@
 """Operations behind the CLI commands. Each returns a JSON-serialisable result dict.
 
-Cap semantics (see the PR description / docs):
+Cap semantics (see README.md and docs/design.md):
 
 - The cap counts *store links* in the project's ``.claude/skills`` (foreign links and real
   directories never count and are never touched).
