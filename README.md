@@ -396,7 +396,7 @@ claude-ss() { skill-store sync; claude "$@"; }
 problem.
 
 The SessionStart hook alone is **not enough** for a fresh checkout. It does create the links, but the
-session has already scanned its skills by then. Verified on Windows: in the interactive TUI (Claude
+session has already scanned its skills by then. Verified on Windows and Linux: in the interactive TUI (Claude
 Code 2.1.319 on Windows, 2.1.318 on Linux) the session **didn't pick them up at all** until
 `/reload-skills`. With `claude -p` they appeared only from the first turn that started after Claude
 Code's file watcher saw them (a few seconds after launch; turn 2 or later). So keep the hook only as a backstop for later sessions, and if
@@ -435,7 +435,7 @@ working there follow it too.
 
 ## Verify in a fresh Claude Code session
 
-Verified on Windows 10 with Claude Code 2.1.318 (details in
+Verified on Windows 10 and on Linux (WSL2 Kali) with Claude Code 2.1.318/2.1.319 (details in
 [docs/verification.md](docs/verification.md#last-verified)):
 
 - ✅ a project-scope **junction** skill is discovered and invoked, including **cross-volume** (store
