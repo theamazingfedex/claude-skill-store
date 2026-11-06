@@ -38,6 +38,7 @@ jobs:
           skill-store init
           skill-store init-project --project "$proj"
           skill-store sync --quiet --project "$proj"
+          skill-store unlink --all --project "$proj"
           skill-store status --project "$proj"
           echo '{"tool_name":"Skill","tool_input":{"skill":"x"}}' | skill-store log-usage
           echo 'garbage' | skill-store log-usage

@@ -193,6 +193,25 @@ def unlink(ctx: Ctx, name: str) -> dict:
             "store_copy_intact": (target / "SKILL.md").is_file() if target.exists() else None}
 
 
+def unlink_all(ctx: Ctx) -> dict:
+    """Remove every link in <project>/.claude/skills that resolves into the store.
+
+    Non-recursive (same path as ``unlink <name>``), does NOT touch the manifest, leaves foreign
+    links and real directories alone. Meant for an AO ``--pre-remove`` step: run it before a
+    worktree is deleted so a recursive delete of the worktree cannot reach the store.
+    Idempotent; does not require the store to exist.
+    """
+    result = {"project": str(ctx.project.root), "removed": [], "errors": []}
+    for name, lp in store_links(ctx).items():
+        try:
+            remove_link(lp)
+            result["removed"].append(name)
+        except (SkillStoreError, OSError) as exc:
+            result["errors"].append(f"{name}: {exc}")
+    result["remaining_store_links"] = sorted(store_links(ctx))
+    return result
+
+
 def sync(ctx: Ctx) -> dict:
     result = {"project": str(ctx.project.root), "linked": [], "already": [], "removed": [],
               "needs_approval": [], "missing": [], "failed_check": {}, "over_cap": [],

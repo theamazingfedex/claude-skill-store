@@ -56,8 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name")
     p = add("link", "link an approved skill into the project (adds it to the manifest, enforces the cap)")
     p.add_argument("name")
-    p = add("unlink", "remove a skill's link (never its store copy) and drop it from the manifest")
-    p.add_argument("name")
+    p = add("unlink", "remove a skill's link (never its store copy) and drop it from the manifest; "
+                      "--all removes every store link and leaves the manifest alone")
+    p.add_argument("name", nargs="?")
+    p.add_argument("--all", action="store_true", dest="all_links",
+                   help="remove every link into the store (for AO --pre-remove); manifest unchanged")
     p = add("sync", "make the project's links match its manifest (idempotent; for SessionStart)")
     p.add_argument("--quiet", action="store_true", help="no output on success; always exit 0")
     add("status", "show store skills, approval, links in this project, last use and cap")
@@ -241,7 +244,18 @@ def run(argv: list[str]) -> int:
             txt += f"\nover cap ({r['cap']}): unlinked least recently used {e['skill']} " \
                    f"(last used {e['last_used'] or 'never'}); its store copy is untouched"
         _print(r, as_json, txt)
+    elif cmd == "unlink" and args.all_links:
+        if args.name:
+            raise SkillStoreError("use either 'unlink <name>' or 'unlink --all', not both")
+        r = ops.unlink_all(ctx)
+        txt = ("unlinked: " + ", ".join(r["removed"])) if r["removed"] else \
+            f"nothing to unlink in {r['project']}"
+        txt += "".join(f"\nerror: {e}" for e in r["errors"])
+        _print(r, as_json, txt)
+        return 1 if r["errors"] else 0
     elif cmd == "unlink":
+        if not args.name:
+            raise SkillStoreError("unlink needs a skill name, or --all")
         r = ops.unlink(ctx, args.name)
         txt = f"{r['state']}: {args.name}" + (" (removed from manifest)" if r["removed_from_manifest"] else "")
         _print(r, as_json, txt)
