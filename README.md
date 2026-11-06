@@ -306,7 +306,7 @@ Two Claude Code hooks connect the store to sessions:
 | Hook | Matcher | Runs | Purpose |
 |---|---|---|---|
 | `PostToolUse` | `Skill` | `skill-store log-usage` | append `{skill, session, project, time}` to `usage.jsonl` (append only; it never writes `store.json`) |
-| `SessionStart` | (all) | `skill-store sync --quiet` | create this checkout's links at session start (usable from the second turn; see below) |
+| `SessionStart` | (all) | `skill-store sync --quiet` | backstop: repair this checkout's links (a session doesn't pick up links the hook creates during its own startup; see [AO worktrees](#ao-worktrees)) |
 
 Both must never get in the way: `log-usage` always exits 0, and `sync --quiet` prints nothing on
 success, because SessionStart output is added to Claude's context. The snippets follow the
@@ -365,12 +365,19 @@ Merge [`snippets/settings.linux.json`](snippets/settings.linux.json) into `~/.cl
 
 ### AO worktrees
 
-New worktrees start without links. **The primary path is an AO `--post-create "skill-store sync"`
-step**: it creates the links before the session starts, so a worker's first prompt can use them. The
-SessionStart hook is a backstop. It does create the links, but Claude Code has already scanned skills
-by then, so they only become available **from the second turn** (verified with Claude Code 2.1.318). As a `--pre-remove` step it can run
-`skill-store unlink --all`, which removes the worktree's store links non-recursively, without
-editing the manifest, before AO deletes the directory. See
+New worktrees start without links. **Sync before Claude Code starts**: an AO
+`--post-create "skill-store sync"` step, or `skill-store sync` in your launcher. Links created that
+way are seen on the first prompt.
+
+The SessionStart hook alone is **not enough** for a fresh checkout. It does create the links, but the
+session has already scanned its skills by then. Verified on Windows: in the interactive TUI (Claude
+Code 2.1.319) the session **didn't pick them up at all** until `/reload-skills`. With `claude -p`
+(2.1.318) they appeared from turn 2. So keep the hook only as a backstop for later sessions, and if
+you rely on it, run `/reload-skills` once in that first session.
+
+As a `--pre-remove` step, an AO project can run `skill-store unlink --all`, which removes the
+worktree's store links non-recursively, without editing the manifest, before AO deletes the
+directory. See
 [snippets/ao-worktree-setup.md](snippets/ao-worktree-setup.md).
 
 ## Unlink safety (hard rule)
@@ -410,9 +417,10 @@ Verified on Windows 10 with Claude Code 2.1.318 (details in
 - ✅ an **edit** to the store copy is picked up when the skill is invoked again;
 - ✅ a link **removed** mid-session can no longer be invoked (`Unknown skill`). ⚠️ The model isn't
   told about removals, though, so it may still name the skill until a new session starts;
-- ⚠️ links created by the `SessionStart` hook are available only **from the second turn**, because
-  the session's first skill scan runs before the hook. For AO workers and `claude -p`, sync before
-  launch (AO `--post-create`) as the primary path: see [AO worktrees](#ao-worktrees);
+- ❌/⚠️ links created by the `SessionStart` hook **during startup** are missed by that session. In
+  the interactive TUI (2.1.319) they don't appear until `/reload-skills`; in `claude -p` (2.1.318)
+  they appear from turn 2. Links that exist **before** launch are found on turn 1. So sync before
+  launching (AO `--post-create`): see [AO worktrees](#ao-worktrees);
 - ✅ the `PostToolUse` usage hook logs one line per Skill call; `/skill-doctor` shows per-skill cost.
 
 Run the ~15-minute checklist in [docs/verification.md](docs/verification.md) on each new OS or
@@ -467,6 +475,8 @@ must never be committed. Delete that *file*, make sure the `.gitignore` is in pl
 - `skill-store status`: is it linked in *this* checkout? Approved? Run `skill-store sync`.
 - Did `.claude/skills/` exist when the session started? If not, Claude Code isn't watching it:
   run `/reload-skills` (the committed `.gitignore` prevents this).
+- Fresh worktree or checkout, with links created by the SessionStart hook? That session misses them:
+  run `/reload-skills` once, and sync before launching next time (AO `--post-create`).
 - **Listing budget:** if the listing overflows, descriptions of rarely used skills are dropped.
   Run `/doctor` (setup check) and `/skill-doctor` (per-skill cost vs use, v2.1.252+). To free
   budget, link fewer skills, keep descriptions short and use-case-first, or set skills you rarely

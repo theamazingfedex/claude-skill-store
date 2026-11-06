@@ -12,8 +12,10 @@ This checklist confirms that Claude Code really picks up skills linked from the 
 
 ## Last verified
 
-Windows 10 Pro 19045, Claude Code **2.1.318**, run by an independent agent on 2026-11-06. It used
-one live `claude -p --input-format stream-json` process for the mid-session steps (no restart, no `--resume`):
+Windows 10 Pro 19045, run by an independent agent on 2026-11-06:
+- Claude Code **2.1.318**, one live `claude -p --input-format stream-json` process for the mid-session
+  steps (no restart, no `--resume`);
+- step 6 re-tested in the **interactive TUI** (Claude Code **2.1.319**, driven through a ConPTY).
 
 | # | Step | Result |
 |---|---|---|
@@ -22,22 +24,26 @@ one live `claude -p --input-format stream-json` process for the mid-session step
 | 3 | Link removed mid-session | ✅ for Claude Code (the skill is gone from the registry; invoking it gives `Unknown skill`). ⚠️ **the model is not told**, so if asked it still claims the skill is available |
 | 4 | Edit inside the store copy | ✅ re-invoking it loads the new body |
 | 5 | Cross-volume (store `C:`, project `E:`) | ✅ |
-| 6 | Fresh worktree via `SessionStart` sync | ⚠️ links are created, but the skills only become available **from the second turn**: the session's first skill scan runs before the hook |
+| 6 | Fresh worktree via `SessionStart` sync | ❌ interactive / ⚠️ `-p`. The hook creates the links within a second of launch, but the session has already scanned its skills. **Interactive (2.1.319): not picked up at all** (still missing on turn 2, ~26 s in) until `/reload-skills` or a new session. `-p` (2.1.318): available from turn 2. Links present **before** launch are found on turn 1 |
 | 7 | `/skill-doctor` per-skill cost | ✅ (~40 tokens of listing per test skill). `/doctor` showed no listing estimate in `-p` mode (interactive not checked) |
 | — | `PostToolUse` `Skill` usage hook | ✅ exactly one `usage.jsonl` line per successful Skill call; none for a failed call |
 
-`/reload-skills` and restarts were never needed. If you run this on another OS or Claude Code
-version, add a row set here.
+`/reload-skills` and restarts were never needed for steps 1–5. Links created *after* startup (step 2)
+are picked up in the interactive TUI too. Only links created by the `SessionStart` hook *during*
+startup are missed. If you run this on another OS or Claude Code version, add a row set here.
 
 What this means in practice:
 
 - Mid-session `link`, `unlink` and edits just work. After an `unlink`, start a new session if you
   want the model's own picture of its skills to be accurate. The skill can no longer be invoked, but
   the model isn't told it's gone.
-- For worktrees and AO workers, create the links **before** the session starts. An AO
-  `--post-create "skill-store sync"` step (or `skill-store sync` in whatever launches Claude Code) is
-  the primary path. The `SessionStart` hook is a backstop: its links are available from the second
-  turn onwards.
+- For fresh worktrees and AO workers, **create the links before Claude Code starts**: an AO
+  `--post-create "skill-store sync"` step, or `skill-store sync` in whatever launches Claude Code.
+  This is the only path that works on the first prompt.
+- The `SessionStart` hook alone is **not enough** for a fresh checkout. It creates the links, but the
+  running session doesn't pick them up. Run `/reload-skills` once (interactive), or start a new
+  session. The links are then there for every later session in that checkout. Keep the hook as a
+  backstop that repairs links for the *next* session (e.g. after a `git pull` changed the manifest).
 
 ## How to run it
 
@@ -176,7 +182,10 @@ git -C "$proj" worktree add ../proj-wt
 `.claude/skills/` in `../proj-wt` now contains only `.gitignore`. Start `claude` there.
 
 - [ ] After the session starts, the links exist (the `SessionStart` hook created them).
-- [ ] The skills are available **from the second turn**. On the very first turn, Claude doesn't know them yet.
+- [ ] Ask about zorblax-verify-beta: expected **not** known yet (interactive 2.1.319: not on turn 2
+      either; `-p` 2.1.318: known from turn 2).
+- [ ] Run `/reload-skills`, ask again: now it works.
+- [ ] Control: `ss sync --project ../proj-wt` **before** starting `claude` in a fresh worktree → known on turn 1.
 - [ ] `git -C ../proj-wt status` shows nothing under `.claude/skills/`.
 
 ### 7. Listing cost

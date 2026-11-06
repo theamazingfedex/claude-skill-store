@@ -70,9 +70,11 @@ text (e.g. Godot docs CC BY 3.0, Khronos copyright).
      under a skills directory that already existed.
 - Linking is driven by the manifest through an **idempotent** `sync`. It runs in every checkout or
   worktree, via an AO `--post-create` step and/or a `SessionStart` hook. Only `--post-create` (or
-  any sync before launch) makes the links available on the **first** prompt. A session scans its
-  skills before the `SessionStart` hook runs, so hook-created links appear from the second turn
-  (verified with 2.1.318). `--post-create` is therefore the primary path and the hook a backstop.
+  any sync before launch) makes the links available to that session. A session scans its skills
+  before the `SessionStart` hook runs. Links the hook creates during startup appeared from turn 2 in
+  `claude -p` (2.1.318), and **not at all until `/reload-skills`** in the interactive TUI (2.1.319).
+  Links created later in a session are picked up normally. `--post-create` is therefore the primary
+  path, and the hook a backstop for later sessions.
 
 ### Unlink safety (standing rule)
 

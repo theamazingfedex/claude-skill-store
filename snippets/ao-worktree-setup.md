@@ -3,11 +3,15 @@
 Links are never committed (`.claude/skills/.gitignore` ignores everything but itself), so every
 new checkout or worktree starts **without** them. Something has to run `skill-store sync` there.
 
-**Use the AO `--post-create` step as the primary path, and the `SessionStart` hook as a backstop.**
-Verified with Claude Code 2.1.318: a session scans its skills *before* the `SessionStart` hook
-runs. So links that only the hook creates are usable **from the second turn**, while an AO worker's
-first prompt (or a `claude -p` one-shot) wouldn't see them. Links created by `--post-create` exist
-before the session starts, so the first prompt can use them.
+**Use the AO `--post-create` step as the primary path; the `SessionStart` hook is only a backstop.**
+A session scans its skills *before* its `SessionStart` hook runs, and doesn't pick up links the hook
+creates during startup. Verified on Windows:
+- in the interactive TUI (Claude Code 2.1.319) they stayed invisible (still missing on turn 2)
+  until `/reload-skills`;
+- in `claude -p` (2.1.318) they appeared from turn 2.
+
+Links created by `--post-create` exist before the session starts, so they are seen on the first
+prompt.
 
 ## 1. AO `--post-create` / `--pre-remove` steps (primary)
 
@@ -64,7 +68,8 @@ Commit [`settings.project.json`](settings.project.json) into the project's `.cla
 [`settings.windows.json`](settings.windows.json) / [`settings.linux.json`](settings.linux.json).
 Claude Code then runs `skill-store sync --quiet` at every session start, in whichever checkout the
 session opens. This covers checkouts that AO didn't create, and repairs links after a `git pull`
-changed the manifest. The links it creates are usable from the second turn.
+changed the manifest. The links it creates during startup are **not** seen by that same session:
+they are there for the next one, or after `/reload-skills`.
 
 The bare `skill-store …` command in `settings.project.json` needs `skill-store` on Claude Code's PATH
 and `SKILL_STORE_HOME` (if set) in its environment. Otherwise it fails silently. If that isn't
