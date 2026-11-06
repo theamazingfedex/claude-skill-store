@@ -10,7 +10,7 @@ This checklist confirms that Claude Code really picks up skills linked from the 
 6. a fresh worktree gets its links from the `SessionStart` hook;
 7. listing cost is visible in `/skill-doctor`.
 
-## Results so far
+## Last verified
 
 Windows 10 Pro 19045, Claude Code **2.1.318**, run by an independent agent on 2026-11-06. It used
 one live `claude -p --input-format stream-json` process for the mid-session steps (no restart, no `--resume`):
@@ -23,7 +23,7 @@ one live `claude -p --input-format stream-json` process for the mid-session step
 | 4 | Edit inside the store copy | ✅ re-invoking it loads the new body |
 | 5 | Cross-volume (store `C:`, project `E:`) | ✅ |
 | 6 | Fresh worktree via `SessionStart` sync | ⚠️ links are created, but the skills only become available **from the second turn**: the session's first skill scan runs before the hook |
-| 7 | `/skill-doctor` per-skill cost | ✅ (~40 tokens of listing per test skill). `/doctor` in `-p` mode showed no listing estimate |
+| 7 | `/skill-doctor` per-skill cost | ✅ (~40 tokens of listing per test skill). `/doctor` showed no listing estimate in `-p` mode (interactive not checked) |
 | — | `PostToolUse` `Skill` usage hook | ✅ exactly one `usage.jsonl` line per successful Skill call; none for a failed call |
 
 `/reload-skills` and restarts were never needed. If you run this on another OS or Claude Code
@@ -34,10 +34,10 @@ What this means in practice:
 - Mid-session `link`, `unlink` and edits just work. After an `unlink`, start a new session if you
   want the model's own picture of its skills to be accurate. The skill can no longer be invoked, but
   the model isn't told it's gone.
-- **When the first prompt matters** (AO workers, `claude -p` one-shots), create the links **before**
-  the session starts: an AO `--post-create "skill-store sync"` step, or `skill-store sync` in the
-  script that launches Claude Code. The `SessionStart` hook alone makes them available from the
-  second turn onwards.
+- For worktrees and AO workers, create the links **before** the session starts. An AO
+  `--post-create "skill-store sync"` step (or `skill-store sync` in whatever launches Claude Code) is
+  the primary path. The `SessionStart` hook is a backstop: its links are available from the second
+  turn onwards.
 
 ## How to run it
 
@@ -114,7 +114,9 @@ EOF
 ```
 
 Open a second terminal for the mid-session commands and define the same `$store` / `$exe` / `ss`
-there (Git Bash only sees variables you export in it).
+there. A Git Bash window only inherits variables such as `SKILL_STORE_HOME` from the shell that
+started it. A new window started from the Start menu or Explorer doesn't see a `$env:` variable set
+in PowerShell, so `export` it again there, or pass `--store` explicitly (the `ss` helper does).
 
 ### 1. Project-scope link is discovered
 
@@ -180,11 +182,14 @@ git -C "$proj" worktree add ../proj-wt
 ### 7. Listing cost
 
 - [ ] `/skill-doctor` lists verify-alpha and verify-beta with their listing cost and use.
-- [ ] Optionally check whether an interactive `/doctor` shows a skill-listing estimate. (2.1.318
-      in `-p` mode showed none.)
+- [ ] `/doctor` may show a skill-listing estimate **in an interactive session only**; this varies by
+      version. With 2.1.318 in `-p` mode it ran an agentic health check and showed no estimate, so
+      rely on `/skill-doctor`.
 
-From Git Bash, run `claude -p /skill-doctor` as `MSYS_NO_PATHCONV=1 claude -p /skill-doctor`.
-Otherwise MSYS rewrites `/skill-doctor` into a Windows path.
+From Git Bash, prefix slash commands passed to `claude -p` with `MSYS_NO_PATHCONV=1`, e.g.
+`MSYS_NO_PATHCONV=1 claude -p "/doctor"` or `MSYS_NO_PATHCONV=1 claude -p /skill-doctor`. Otherwise
+MSYS rewrites `/doctor` into a Windows path such as `C:/Program Files/Git/doctor`. PowerShell doesn't
+have this problem.
 
 ## Clean up
 

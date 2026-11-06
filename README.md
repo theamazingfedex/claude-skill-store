@@ -357,15 +357,18 @@ Merge [`snippets/settings.linux.json`](snippets/settings.linux.json) into `~/.cl
   - [`snippets/settings.user.json`](snippets/settings.user.json): user-level usage hook;
   - [`snippets/settings.project.json`](snippets/settings.project.json): a `SessionStart` sync to
     **commit** into a project's `.claude/settings.json`, so everyone who clones it gets the sync.
-- If you set a custom `SKILL_STORE_HOME`, make sure the environment Claude Code is launched from
-  has it (user environment variable / shell profile). Hooks inherit Claude Code's environment.
+- The bare `skill-store …` commands need `skill-store` on Claude Code's PATH and, if you set one, a
+  custom `SKILL_STORE_HOME` in its environment (user environment variable / shell profile). Hooks
+  inherit Claude Code's environment. Otherwise they fail silently. For a venv install, use the exec
+  form with the full path plus `--store`:
+  `{"type": "command", "command": "C:/…/venv/Scripts/skill-store.exe", "args": ["--store", "C:/…/store", "log-usage"]}`.
 
 ### AO worktrees
 
-New worktrees start without links. The SessionStart hook creates them, but Claude Code has already
-scanned skills by then, so they only become available **from the second turn**. AO workers often
-need their skills on the first prompt, so an AO project should also run `skill-store sync` as a
-`--post-create` step. That creates the links before the session starts. As a `--pre-remove` step it can run
+New worktrees start without links. **The primary path is an AO `--post-create "skill-store sync"`
+step**: it creates the links before the session starts, so a worker's first prompt can use them. The
+SessionStart hook is a backstop. It does create the links, but Claude Code has already scanned skills
+by then, so they only become available **from the second turn** (verified with Claude Code 2.1.318). As a `--pre-remove` step it can run
 `skill-store unlink --all`, which removes the worktree's store links non-recursively, without
 editing the manifest, before AO deletes the directory. See
 [snippets/ao-worktree-setup.md](snippets/ao-worktree-setup.md).
@@ -399,7 +402,7 @@ working there follow it too.
 ## Verify in a fresh Claude Code session
 
 Verified on Windows 10 with Claude Code 2.1.318 (details in
-[docs/verification.md](docs/verification.md#results-so-far)):
+[docs/verification.md](docs/verification.md#last-verified)):
 
 - ✅ a project-scope **junction** skill is discovered and invoked, including **cross-volume** (store
   on `C:`, project on `E:`);
@@ -408,8 +411,8 @@ Verified on Windows 10 with Claude Code 2.1.318 (details in
 - ✅ a link **removed** mid-session can no longer be invoked (`Unknown skill`). ⚠️ The model isn't
   told about removals, though, so it may still name the skill until a new session starts;
 - ⚠️ links created by the `SessionStart` hook are available only **from the second turn**, because
-  the session's first skill scan runs before the hook. When the first prompt matters (AO workers,
-  `claude -p`), also sync before launch: see [AO worktrees](#ao-worktrees);
+  the session's first skill scan runs before the hook. For AO workers and `claude -p`, sync before
+  launch (AO `--post-create`) as the primary path: see [AO worktrees](#ao-worktrees);
 - ✅ the `PostToolUse` usage hook logs one line per Skill call; `/skill-doctor` shows per-skill cost.
 
 Run the ~15-minute checklist in [docs/verification.md](docs/verification.md) on each new OS or
