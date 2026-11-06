@@ -254,7 +254,7 @@ skill-store link <name>      # must exist, pass `check`, and be approved; adds t
 skill-store unlink <name>    # removes ONLY the link (never the store copy), removes from manifest
 skill-store unlink --all     # removes every store link in this checkout; manifest unchanged (before deleting a worktree)
 skill-store sync             # make links match the manifest; idempotent, safe to run any time
-skill-store status           # store skills, approval, linked here?, last used, cap usage
+skill-store status           # store skills, approval, linked here?, last used (store-wide), cap usage
 ```
 
 All commands accept `--store PATH` and `--project PATH`, and `--json` where it makes sense. The
@@ -305,8 +305,8 @@ Two Claude Code hooks connect the store to sessions:
 
 | Hook | Matcher | Runs | Purpose |
 |---|---|---|---|
-| `PostToolUse` | `Skill` | `skill-store log-usage` | append `{skill, session, project, time}` to `usage.jsonl`, update `last_used` |
-| `SessionStart` | (all) | `skill-store sync --quiet` | create this checkout's links before work starts |
+| `PostToolUse` | `Skill` | `skill-store log-usage` | append `{skill, session, project, time}` to `usage.jsonl` (append only; it never writes `store.json`) |
+| `SessionStart` | (all) | `skill-store sync --quiet` | backstop: repair this checkout's links (a session doesn't pick up links the hook creates during its own startup; see [AO worktrees](#ao-worktrees)) |
 
 Both must never get in the way: `log-usage` always exits 0, and `sync --quiet` prints nothing on
 success, because SessionStart output is added to Claude's context. The snippets follow the
@@ -357,15 +357,46 @@ Merge [`snippets/settings.linux.json`](snippets/settings.linux.json) into `~/.cl
   - [`snippets/settings.user.json`](snippets/settings.user.json): user-level usage hook;
   - [`snippets/settings.project.json`](snippets/settings.project.json): a `SessionStart` sync to
     **commit** into a project's `.claude/settings.json`, so everyone who clones it gets the sync.
-- If you set a custom `SKILL_STORE_HOME`, make sure the environment Claude Code is launched from
-  has it (user environment variable / shell profile). Hooks inherit Claude Code's environment.
+- The bare `skill-store …` commands need `skill-store` on Claude Code's PATH and, if you set one, a
+  custom `SKILL_STORE_HOME` in its environment (user environment variable / shell profile). Hooks
+  inherit Claude Code's environment. Otherwise they fail silently. For a venv install, use the exec
+  form with the full path plus `--store`:
+  `{"type": "command", "command": "C:/…/venv/Scripts/skill-store.exe", "args": ["--store", "C:/…/store", "log-usage"]}`.
+
+**Workspace trust.** Project-level hooks (in a project's `.claude/settings.json`) run only in a folder you
+have trusted. In the interactive TUI, a new folder (including a new worktree path) shows "Is this a
+project you created or one you trust?" with **"No, exit" selected by default**. Until you choose to
+trust it, neither the SessionStart sync nor the usage hook runs. Claude Code records the choice in
+`~/.claude.json`. In `claude -p` mode, project hooks ran without a prompt. User-level hooks in
+`~/.claude/settings.json` don't depend on this.
 
 ### AO worktrees
 
-New worktrees start without links. Besides the SessionStart hook, an AO project can run
-`skill-store sync` as a `--post-create` step. As a `--pre-remove` step it can run
-`skill-store unlink --all`, which removes the worktree's store links non-recursively, without
-editing the manifest, before AO deletes the directory. See
+New worktrees start without links. **Always run `skill-store sync` before launching `claude` in a
+fresh checkout or worktree.** Use an AO `--post-create "skill-store sync"` step, or a small launch
+wrapper. Links created that way are seen on the first prompt:
+
+```powershell
+# Windows: e.g. a function in your PowerShell profile
+function claude-ss { skill-store sync; claude @args }
+```
+```bash
+# Linux: e.g. in ~/.bashrc
+claude-ss() { skill-store sync; claude "$@"; }
+```
+
+`sync` exits 0 when there's nothing to do, and the wrapper starts `claude` even if `sync` reports a
+problem.
+
+The SessionStart hook alone is **not enough** for a fresh checkout. It does create the links, but the
+session has already scanned its skills by then. Verified on Windows: in the interactive TUI (Claude
+Code 2.1.319) the session **didn't pick them up at all** until `/reload-skills`. With `claude -p`
+(2.1.318) they appeared from turn 2. So keep the hook only as a backstop for later sessions, and if
+you rely on it, run `/reload-skills` once in that first session.
+
+As a `--pre-remove` step, an AO project can run `skill-store unlink --all`, which removes the
+worktree's store links non-recursively, without editing the manifest, before AO deletes the
+directory. See
 [snippets/ao-worktree-setup.md](snippets/ao-worktree-setup.md).
 
 ## Unlink safety (hard rule)
@@ -396,31 +427,33 @@ working there follow it too.
 
 ## Verify in a fresh Claude Code session
 
-Claude Code documents that skill dirs may be symlinks and that changes under an existing
-`.claude/skills/` are picked up mid-session. These parts **have not yet been observed in a
-fresh session** (known unverified behaviour):
+Verified on Windows 10 with Claude Code 2.1.318 (details in
+[docs/verification.md](docs/verification.md#last-verified)):
 
-1. a project-scope junction/symlink skill is listed and loads;
-2. a link added mid-session appears without a restart;
-3. a link removed mid-session disappears;
-4. edits inside the link target (the store copy) are picked up;
-5. Claude Code's discovery through cross-volume junctions (store on `C:`, project on `E:`). The
-   junctions themselves work: link, read through, `sync` and `unlink` were tested with the CLI in
-   both directions, and there's an opt-in test (`SKILL_STORE_TEST_OTHER_VOLUME=E:\ pytest
-   tests/test_cross_volume.py`).
+- ✅ a project-scope **junction** skill is discovered and invoked, including **cross-volume** (store
+  on `C:`, project on `E:`);
+- ✅ a link **added** mid-session is picked up on the next turn, without a restart or `/reload-skills`;
+- ✅ an **edit** to the store copy is picked up when the skill is invoked again;
+- ✅ a link **removed** mid-session can no longer be invoked (`Unknown skill`). ⚠️ The model isn't
+  told about removals, though, so it may still name the skill until a new session starts;
+- ❌/⚠️ links created by the `SessionStart` hook **during startup** are missed by that session. In
+  the interactive TUI (2.1.319) they don't appear until `/reload-skills`; in `claude -p` (2.1.318)
+  they appear from turn 2. Links that exist **before** launch are found on turn 1. So sync before
+  launching (AO `--post-create`): see [AO worktrees](#ao-worktrees);
+- ✅ the `PostToolUse` usage hook logs one line per Skill call; `/skill-doctor` shows per-skill cost.
 
-Run the ~10-minute manual checklist in [docs/verification.md](docs/verification.md) once per machine.
-It uses a scratch store (`SKILL_STORE_HOME`) and a scratch project with two tiny test skills. In
-short:
+Run the ~15-minute checklist in [docs/verification.md](docs/verification.md) on each new OS or
+Claude Code version. It uses a scratch store, a scratch project with two tiny test skills, and
+project-level hooks only. In short:
 
 ```sh
 skill-store link verify-alpha    # then start `claude` in the project: /skills lists it, asking triggers it
 skill-store link verify-beta     # with the session still open: does it appear without a restart?
-skill-store unlink verify-alpha  # does it disappear? is the store copy still there?
+skill-store unlink verify-alpha  # can it still be invoked? is the store copy still there?
 # edit the store copy of verify-alpha's SKILL.md: is the change picked up?
 ```
 
-Report the results (✅/❌ per step, Claude Code version, OS) so this section can be updated.
+Add your results (✅/❌ per step, Claude Code version, OS) to the table in docs/verification.md.
 
 ## Troubleshooting
 
@@ -439,8 +472,10 @@ required for anything here.
 
 **Windows: store and project on different drives.** Junctions support any **local** volume
 (e.g. store on `C:`, repo on `E:`). `link`, reading and writing through the junction, `sync` and
-`unlink` were tested in both directions and work. Claude Code's discovery across volumes is part of
-the [verification checklist](docs/verification.md). Junctions **cannot** point at network shares
+`unlink` were tested in both directions and work. Claude Code discovers and invokes skills through
+such a cross-drive junction too: this was verified with Claude Code 2.1.318 on Windows 10 (store on
+`C:`, project on `E:`; see [docs/verification.md](docs/verification.md#last-verified)). Junctions
+**cannot** point at network shares
 or mapped network drives, so keep the store on a local disk. A junction stores an absolute path: if
 you move the store, unlink everywhere first, then `sync` again with the new `SKILL_STORE_HOME`.
 
@@ -459,6 +494,8 @@ must never be committed. Delete that *file*, make sure the `.gitignore` is in pl
 - `skill-store status`: is it linked in *this* checkout? Approved? Run `skill-store sync`.
 - Did `.claude/skills/` exist when the session started? If not, Claude Code isn't watching it:
   run `/reload-skills` (the committed `.gitignore` prevents this).
+- Fresh worktree or checkout, with links created by the SessionStart hook? That session misses them:
+  run `/reload-skills` once, and sync before launching next time (AO `--post-create`).
 - **Listing budget:** if the listing overflows, descriptions of rarely used skills are dropped.
   Run `/doctor` (setup check) and `/skill-doctor` (per-skill cost vs use, v2.1.252+). To free
   budget, link fewer skills, keep descriptions short and use-case-first, or set skills you rarely
@@ -478,12 +515,27 @@ must never be committed. Delete that *file*, make sure the `.gitignore` is in pl
 **`link` refuses.** It requires the skill to exist in the store, pass `check`, and be approved.
 The error says which. Run `skill-store check <name>`, then `skill-store approve <name>` (your decision).
 
-**`sync` didn't link something in the manifest.** Run `skill-store sync` without `--quiet` (or
-`skill-store status`). It lists entries that are **not approved**, **not in the store**, **failed
-check** (e.g. after a rebuild), **over cap** (more listed than the cap; the most recently used win),
-or in **conflict** (the name is taken by a real directory or a foreign link, which `sync` never
-touches). With `--quiet`, these notes go to stderr and the exit code is always 0. You can see them
-with `claude --debug`.
+**`sync` didn't link something in the manifest, or removed a link.** Run `skill-store sync`
+without `--quiet` (or `skill-store status`).
+
+Entries it didn't link are reported as:
+- `needs approval`;
+- `not in store`;
+- `fails admission, not linked` (it fails `check`, e.g. after a rebuild; the reasons follow in brackets);
+- `over cap, not linked` (more listed than the cap; the most recently used win);
+- `name taken by a non-store entry` (a real directory or a foreign link there, which `sync` never
+  touches).
+
+Every link it removed is reported under exactly one reason:
+- `unlinked (no longer listed)`;
+- `over cap, unlinked`;
+- `unlinked (now fails admission)`;
+- `unlinked (not in store or not approved)`;
+- `relinked` (it pointed at the wrong store skill).
+
+A link that can't be removed (e.g. a junction held open by antivirus or the indexer) is reported as
+an error for that skill, and the rest of the sync continues. With `--quiet`, these notes go to
+stderr and the exit code is always 0. You can see them with `claude --debug`.
 
 **Usage isn't being logged / LRU looks wrong.** Check `/hooks` in Claude Code, and run with
 `claude --debug` to see hook output. Only Skill **tool** calls are logged: typing `/skill-name`
@@ -501,8 +553,13 @@ the files came from a download.
 **Something deleted store files.** Almost always a recursive delete through a link (see
 [Unlink safety](#unlink-safety-hard-rule)). Rebuild with `skill-store build <name> --recipe
 ~/.skill-store/build/<name>/recipe.json --skip-scrape`: the raw pages in `build/<name>/output/` make
-this cheap, unless they were deleted too. The version before the last rebuild is in
+this cheap, unless they were deleted too. After a successful rebuild, the version before it is in
 `build/<name>/previous/`.
+
+If a rebuild can't move the new version into place (e.g. Windows Defender holds a file open),
+`build` puts the previous version back as the live `skills/<name>/`, so links never dangle. The new
+build is left in `build/<name>/staging/` for inspection. In that case `build/<name>/previous/` no
+longer exists: the old backup was deleted, and the live version was moved into it and back out.
 
 ## Command reference
 

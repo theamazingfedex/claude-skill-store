@@ -60,15 +60,21 @@ text (e.g. Godot docs CC BY 3.0, Khronos copyright).
 - **Linux/macOS: symlinks.**
 - Claude Code follows both. Its docs say a skill entry "can be a symlink to a directory elsewhere on
   disk". `claude plugin validate` confirms a session "does follow" junctions, and a user-scope
-  junction (`find-skills`) was seen loading. The [verification checklist](verification.md) covers
-  what is still unverified.
+  junction (`find-skills`) was seen loading. Project-scope junctions were then verified on Windows 10
+  with Claude Code 2.1.318, including cross-volume links and mid-session link, unlink and edit
+  pickup: see the [recorded results](verification.md#last-verified).
 - **Links are never committed.** Each project commits `.claude/skills/.gitignore` containing `*`
   and `!.gitignore`, for two reasons:
   1. git follows junctions and would stage the target's files as regular files (verified);
   2. the directory must exist at session start, because Claude Code only live-reloads changes
      under a skills directory that already existed.
-- Linking is driven by the manifest through an **idempotent** `sync`. It runs at session start in
-  every checkout or worktree, via a `SessionStart` hook and/or an AO `--post-create` step.
+- Linking is driven by the manifest through an **idempotent** `sync`. It runs in every checkout or
+  worktree, via an AO `--post-create` step and/or a `SessionStart` hook. Only `--post-create` (or
+  any sync before launch) makes the links available to that session. A session scans its skills
+  before the `SessionStart` hook runs. Links the hook creates during startup appeared from turn 2 in
+  `claude -p` (2.1.318), and **not at all until `/reload-skills`** in the interactive TUI (2.1.319).
+  Links created later in a session are picked up normally. `--post-create` is therefore the primary
+  path, and the hook a backstop for later sessions.
 
 ### Unlink safety (standing rule)
 
@@ -119,7 +125,10 @@ These are enforced by `skill-store check` before linking. They are looser than t
 ### Usage tracking
 
 A `PostToolUse` hook with matcher `Skill` appends `{skill, session, project, time}` to
-`usage.jsonl` in the store and updates `last_used`. This covers AO workers and stays outside every
+`usage.jsonl` in the store. The hook only appends: it never rewrites `store.json`, so
+concurrent sessions can't lose each other's updates (or an `approve`). `usage.jsonl` is the source
+of truth for recency; `store.json` `last_used` is refreshed from it whenever a command saves
+`store.json`. This covers AO workers and stays outside every
 repo. Note that typing `/skill-name` directly bypasses the Skill tool and therefore the hook. Those
 invocations are not counted, which can make a skill you only invoke by hand look unused.
 
