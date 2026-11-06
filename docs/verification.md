@@ -59,7 +59,7 @@ Register, approve and link only the first one:
 
 ```sh
 skill-store check verify-alpha
-skill-store approve verify-alpha      # if `approve` reports it isn't registered, see the README build section
+skill-store approve verify-alpha      # also registers the hand-written skill in store.json (source "manual")
 skill-store approve verify-beta
 skill-store link verify-alpha
 skill-store status

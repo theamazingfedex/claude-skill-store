@@ -80,7 +80,7 @@ third-party text and must never end up in a project's git history.
 | Python | **3.10+** | the `skill-store` CLI (stdlib + PyYAML) |
 | git | any recent | cloning; project root detection |
 | [Claude Code](https://code.claude.com/docs) | recent (`/skill-doctor` needs v2.1.252+) | using the skills, hooks |
-| skill-seekers | **exactly 3.1.3**: `pip install skill-seekers==3.1.3` | only `skill-store build` |
+| skill-seekers | **exactly 3.1.3** (installed by the `[build]` extra) | only `skill-store build` |
 | `gh` (GitHub CLI) | optional | cloning this private repo, reporting verification results |
 
 On Windows, nothing needs admin rights or Developer Mode: the tool uses directory **junctions**,
@@ -99,9 +99,9 @@ New-Item -ItemType Directory -Force "$env:USERPROFILE\src" | Out-Null
 gh repo clone theamazingfedex/claude-skill-store "$env:USERPROFILE\src\claude-skill-store"
 Set-Location "$env:USERPROFILE\src\claude-skill-store"
 
-# 2. Install the CLI (editable, so `git pull` updates it), plus the pinned builder
-py -3 -m pip install --user -e .
-py -3 -m pip install --user skill-seekers==3.1.3      # optional: only for `skill-store build`
+# 2. Install the CLI (editable, so `git pull` updates it). The [build] extra adds skill-seekers==3.1.3,
+#    which only `skill-store build` needs; drop it for link/sync-only machines.
+py -3 -m pip install --user -e ".[build]"
 
 # 3. Make sure the console script is on PATH (pip prints a warning if it isn't)
 skill-store --help
@@ -111,8 +111,9 @@ skill-store --help
 # Without PATH changes you can always use:  py -3 -m skillstore --help
 ```
 
-Prefer isolation? `pipx install -e .`, then `pipx inject <package> skill-seekers==3.1.3`. Use the
-package name from `pyproject.toml` / `pipx list`.
+Prefer isolation? `pipx install -e ".[build]"` (the package is `claude-skill-store`). To run from the
+checkout without installing at all, use the thin wrappers in [`bin/`](bin/):
+`bin\skill-store.cmd` / `bin\skill-store.ps1`. They still need Python and PyYAML.
 
 ### Linux (bash)
 
@@ -122,11 +123,11 @@ mkdir -p ~/src
 gh repo clone theamazingfedex/claude-skill-store ~/src/claude-skill-store   # or: git clone git@github.com:theamazingfedex/claude-skill-store.git
 cd ~/src/claude-skill-store
 
-# 2. Install the CLI (editable) plus the pinned builder
-python3 -m pip install --user -e .
-python3 -m pip install --user skill-seekers==3.1.3     # optional: only for `skill-store build`
+# 2. Install the CLI (editable). The [build] extra adds skill-seekers==3.1.3 (only `build` needs it).
+python3 -m pip install --user -e ".[build]"
 # On distros with an "externally managed" system Python (PEP 668), use pipx or a venv instead:
-#   pipx install -e . && pipx inject <package> skill-seekers==3.1.3
+#   pipx install -e ".[build]"
+# Or run from the checkout without installing: bin/skill-store.sh (needs Python + PyYAML)
 
 # 3. Check it is on PATH (~/.local/bin for --user installs)
 skill-store --help || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
@@ -138,7 +139,7 @@ macOS works like Linux.
 ## Initialise the store
 
 ```sh
-skill-store init          # creates ~/.skill-store/{skills,build} and an empty store.json. Idempotent.
+skill-store init          # creates ~/.skill-store/{skills,build}, store.json and usage.jsonl. Idempotent.
 skill-store status
 ```
 
@@ -170,14 +171,18 @@ This creates two files. **Commit both**:
   { "version": 1, "cap": 8, "skills": [] }
   ```
 
-  `cap` is optional (default 8). `link`/`unlink` edit the list for you.
+  `cap` is optional (default 8). `link`, `unlink` and `prune` edit the list for you; `sync` only
+  reads it (it never writes the manifest, so session starts don't create git diffs).
 
 - `.claude/skills/.gitignore`, which keeps links out of git:
 
   ```gitignore
+  # Managed by skill-store: links into the skill store are never committed.
   *
   !.gitignore
   ```
+
+  An existing `.gitignore` there is never modified. `sync` warns if it doesn't contain `*`.
 
   Both reasons matter. **Git follows junctions**: without this file, `git add -A` stages the
   store's files as regular files (verified on Windows), and on Linux a committed symlink is
@@ -193,17 +198,28 @@ Full field reference: [docs/schemas.md](docs/schemas.md).
 ## Build a skill
 
 ```sh
-skill-store build <name> --recipe path/to/recipe.json     # scrape + post-process + register
-skill-store build <name> --recipe path/to/recipe.json --skip-scrape   # rebuild from cached pages
-skill-store postprocess <name>                            # re-run only the post-processor
-skill-store check <name>                                  # admission rules; non-zero exit on failure
+skill-store build godot47-asset-pipeline --recipe examples/recipes/godot47-asset-pipeline.recipe.json
+skill-store build <name> --recipe <recipe.json> --skip-scrape    # rebuild from cached raw pages
+skill-store postprocess <name> [--recipe FILE] [--from DIR]      # re-run only the post-processor
+skill-store check <name|path>                                    # admission rules; exit 1 on failure
 ```
 
-`build` runs skill-seekers **3.1.3** with `--enhance-level 0` in `~/.skill-store/build/<name>/`.
-The post-processor then writes or validates a real **quoted** description, splits oversized
-references at headings with a TOC, and drops junk (e.g. `quality_report.json`). Finally it
-validates the result (strict YAML parse, `claude plugin validate` if available, `check`) and
-registers it in `store.json` with `approved: false`. See [`examples/`](examples/) for a recipe.
+A **recipe** (JSON, [`schemas/recipe.schema.json`](schemas/recipe.schema.json)) carries the skill's
+`name`, the hand-written `description`, provenance (`source`, `version`, `pinned_url`) and the
+skill-seekers config under `skill_seekers.config`. Examples are in [`examples/recipes/`](examples/recipes/).
+
+`build` runs skill-seekers **3.1.3** (`scrape --config … --enhance-level 0`) with
+`~/.skill-store/build/<name>/` as the cwd. The post-processor then:
+- writes the recipe's **quoted** description;
+- splits references over `max_reference_tokens` (default 20k) at headings and adds TOCs;
+- drops junk (e.g. `quality_report.json`);
+- validates the result: a strict YAML parse and `check`, plus `claude plugin validate` on a
+  throwaway plugin wrapper when `claude` is on PATH (`--no-claude-validate` skips that);
+- registers it in `store.json` with `approved: false`.
+
+A rebuild swaps `skills/<name>` in place, so existing links keep working, and the previous version
+is kept in `build/<name>/previous/`. `build` refuses other skill-seekers versions unless you pass
+`--any-skill-seekers-version`. It fails if skill-seekers produced no reference files.
 
 Read [docs/build-recipe.md](docs/build-recipe.md) before writing a recipe. skill-seekers 3.1.3 has
 about a dozen pitfalls: unquoted descriptions, `--output` ignored, the unified docs route that
@@ -218,7 +234,11 @@ Never use `skill-seekers install-agent` for the store: it copies into a hard-cod
 skill-store approve <name>
 ```
 
-Approval is **your** explicit decision and is recorded in `store.json`. It is needed once per skill:
+Approval is **your** explicit decision and is recorded in `store.json`. It is needed once per skill.
+`approve` also registers a hand-written skill you placed in `~/.skill-store/skills/<name>/` yourself
+(`source: "manual"`). It warns, but still approves, if the skill fails `check`; `link` will refuse it
+until it passes.
+
 
 - linking a never-approved skill fails, telling you to run `approve`;
 - `sync` reports unapproved manifest entries and doesn't link them;
@@ -232,7 +252,7 @@ before anything new is approved.
 ```sh
 skill-store link <name>      # must exist, pass `check`, and be approved; adds to manifest, creates link, enforces cap
 skill-store unlink <name>    # removes ONLY the link (never the store copy), removes from manifest
-skill-store unlink --all      # removes every store link in this checkout; manifest unchanged (before deleting a worktree)
+skill-store unlink --all     # removes every store link in this checkout; manifest unchanged (before deleting a worktree)
 skill-store sync             # make links match the manifest; idempotent, safe to run any time
 skill-store status           # store skills, approval, linked here?, last used, cap usage
 ```
@@ -241,12 +261,17 @@ All commands accept `--store PATH` and `--project PATH`, and `--json` where it m
 project is resolved from `--project`, then `CLAUDE_PROJECT_DIR`, then the git toplevel of the cwd,
 then the cwd.
 
-What `sync` does:
+What `sync` does (it only reads the manifest, never writes it):
 
-- creates missing links for **approved** manifest entries;
+- creates missing links for manifest entries that are **approved** and pass **`check`**;
+- reports, without linking, entries that are not approved, not in the store, or fail `check`
+  (a skill that fails `check` after a rebuild also has its existing link removed);
 - removes links that point **into the store** but are no longer in the manifest;
-- leaves real directories and links pointing elsewhere alone;
-- enforces the cap.
+- leaves real directories and links pointing elsewhere alone (a name taken by one is reported as a
+  conflict);
+- if the manifest lists more linkable skills than the cap, it links the `cap` most recently used
+  ones and reports the rest as over the cap;
+- does nothing at all (not even creating `.claude/skills/`) in a project with no manifest.
 
 Run it after `git pull` changes a manifest, and in every new checkout or worktree. The
 [hooks](#enable-the-hooks-usage-tracking-and-session-start-sync) do this for you at session start.
@@ -257,11 +282,19 @@ Under the hood: Windows creates an NTFS **junction** (like `New-Item -ItemType J
 ## Cap and pruning
 
 - Each project links at most **8** domain skills by default. Override it with `"cap": N` in the manifest.
-- `link` past the cap **unlinks the least recently used** linked skill (from `usage.jsonl` /
-  `last_used`) and tells you which. The skill stays in the store and stays approved, so it can be
-  re-linked at any time.
-- `skill-store prune [--cap N]` unlinks LRU skills down to the cap, on demand. There is **no**
-  scheduled pruning.
+- `link` past the cap **unlinks the least recently used** other skill(s), **removes them from the
+  manifest** (so the next `sync` doesn't re-link them), and tells you which:
+  `over cap (8): unlinked least recently used X (last used …); its store copy is untouched`.
+  The skill stays in the store and stays approved, so `skill-store link X` brings it back at any
+  time without new approval.
+- `skill-store prune [--cap N]` does the same on demand, down to the cap (default: the manifest's).
+  There is **no** scheduled pruning.
+- `sync` never prunes the manifest. If the manifest lists more skills than the cap (e.g. after a
+  merge), it links the most recently used ones and reports the rest.
+- "Recently used" means the latest `usage.jsonl` entry for the skill **across all projects and
+  worktrees**, falling back to `store.json` `last_used`. **Never-used skills count as least
+  recent**, and ties break by manifest order. So a skill you just linked but haven't used yet is
+  the first to go when you link another one past the cap.
 
 LRU only works if the [usage hook](#enable-the-hooks-usage-tracking-and-session-start-sync) is
 installed. Typing `/skill-name` yourself bypasses the Skill tool, so those uses aren't counted.
@@ -371,8 +404,10 @@ fresh session** (known unverified behaviour):
 2. a link added mid-session appears without a restart;
 3. a link removed mid-session disappears;
 4. edits inside the link target (the store copy) are picked up;
-5. cross-volume junctions (store on `C:`, project on `E:`). These were tested at the filesystem
-   level only (create, read and write through, non-recursive removal all work).
+5. Claude Code's discovery through cross-volume junctions (store on `C:`, project on `E:`). The
+   junctions themselves work: link, read through, `sync` and `unlink` were tested with the CLI in
+   both directions, and there's an opt-in test (`SKILL_STORE_TEST_OTHER_VOLUME=E:\ pytest
+   tests/test_cross_volume.py`).
 
 Run the ~10-minute manual checklist in [docs/verification.md](docs/verification.md) once per machine.
 It uses a scratch store (`SKILL_STORE_HOME`) and a scratch project with two tiny test skills. In
@@ -392,7 +427,8 @@ Report the results (✅/❌ per step, Claude Code version, OS) so this section c
 **`skill-store` not found (terminal or hooks).** The user Scripts dir isn't on PATH (Windows
 `py -3 -c "import sysconfig; print(sysconfig.get_path('scripts','nt_user'))"`, Linux `~/.local/bin`).
 Fix PATH, or use the wrapper hooks and set `SKILL_STORE_CMD` to the full path of the console
-script. `python -m skillstore` always works. Claude Code inherits its environment from where it
+script (or of `bin/skill-store.sh` / `bin\skill-store.cmd` in your clone). `python -m skillstore`
+works wherever the package is installed. Claude Code inherits its environment from where it
 was launched, so restart it after changing PATH.
 
 **Windows: "A required privilege is not held by the client" / "You do not have sufficient
@@ -402,14 +438,16 @@ junctions don't. `skill-store` uses junctions on Windows. If you made links by h
 required for anything here.
 
 **Windows: store and project on different drives.** Junctions support any **local** volume
-(e.g. store on `C:`, repo on `E:`). Creating, reading and writing through such a junction and
-removing it non-recursively were tested and work. Claude Code's discovery across volumes is part of
+(e.g. store on `C:`, repo on `E:`). `link`, reading and writing through the junction, `sync` and
+`unlink` were tested in both directions and work. Claude Code's discovery across volumes is part of
 the [verification checklist](docs/verification.md). Junctions **cannot** point at network shares
 or mapped network drives, so keep the store on a local disk. A junction stores an absolute path: if
 you move the store, unlink everywhere first, then `sync` again with the new `SKILL_STORE_HOME`.
 
 **Git wants to commit files under `.claude/skills/`.** The `.claude/skills/.gitignore` is missing
-or was edited. Run `skill-store init-project` (or `sync`) to restore it. If store files are already
+or was edited (`sync` warns when it lacks `*`). If it is missing, `skill-store init-project`
+recreates it. An existing file is never modified, so if it was edited, put the `*` and `!.gitignore`
+lines back by hand. If store files are already
 staged, unstage them with `git rm -r --cached .claude/skills/<name>`. `--cached` touches only the
 index and leaves the working tree and the store alone. If they were committed, remove them from
 history before pushing: they are third-party content.
@@ -440,6 +478,13 @@ must never be committed. Delete that *file*, make sure the `.gitignore` is in pl
 **`link` refuses.** It requires the skill to exist in the store, pass `check`, and be approved.
 The error says which. Run `skill-store check <name>`, then `skill-store approve <name>` (your decision).
 
+**`sync` didn't link something in the manifest.** Run `skill-store sync` without `--quiet` (or
+`skill-store status`). It lists entries that are **not approved**, **not in the store**, **failed
+check** (e.g. after a rebuild), **over cap** (more listed than the cap; the most recently used win),
+or in **conflict** (the name is taken by a real directory or a foreign link, which `sync` never
+touches). With `--quiet`, these notes go to stderr and the exit code is always 0. You can see them
+with `claude --debug`.
+
 **Usage isn't being logged / LRU looks wrong.** Check `/hooks` in Claude Code, and run with
 `claude --debug` to see hook output. Only Skill **tool** calls are logged: typing `/skill-name`
 bypasses the tool. Test the hook by hand:
@@ -454,28 +499,34 @@ Claude's context. Use `sync --quiet` (the snippets do).
 the files came from a download.
 
 **Something deleted store files.** Almost always a recursive delete through a link (see
-[Unlink safety](#unlink-safety-hard-rule)). Rebuild with `skill-store build <name> --skip-scrape`:
-the raw pages in `build/<name>/` make this cheap, unless they were deleted too.
+[Unlink safety](#unlink-safety-hard-rule)). Rebuild with `skill-store build <name> --recipe
+~/.skill-store/build/<name>/recipe.json --skip-scrape`: the raw pages in `build/<name>/output/` make
+this cheap, unless they were deleted too. The version before the last rebuild is in
+`build/<name>/previous/`.
 
 ## Command reference
 
 | Command | Does |
 |---|---|
-| `init` | create the store layout and an empty `store.json` (idempotent) |
+| `init` | create the store layout, `store.json` and `usage.jsonl` (idempotent) |
 | `init-project` | create `.claude/skills/.gitignore` and an empty manifest if missing |
-| `build <name> --recipe FILE [--skip-scrape]` | skill-seekers 3.1.3 build + post-process + register (unapproved) |
-| `postprocess <name>` | re-run only the post-processor |
-| `check <name\|path>` | admission rules; non-zero exit on failure |
-| `approve <name>` | record your approval in `store.json` |
-| `link <name>` | approved + checked only; add to manifest, link, enforce cap (LRU unlink, reported) |
+| `build <name> --recipe FILE [--skip-scrape] [--no-claude-validate] [--any-skill-seekers-version]` | skill-seekers 3.1.3 build + post-process + register (unapproved) |
+| `postprocess <name> [--recipe FILE] [--from DIR] [--no-claude-validate]` | re-run only the post-processor (default input `build/<name>/output/<name>`) |
+| `check <name\|path>` | admission rules; exit 1 on failure |
+| `approve <name>` | record your approval in `store.json`; registers hand-written skills (`source: "manual"`) |
+| `link <name>` | approved + checked only; add to manifest, link, enforce cap (LRU unlinked **and removed from manifest**, reported) |
 | `unlink <name>` | remove the link only; remove from manifest |
 | `unlink --all` | remove every store link in this project, non-recursively; manifest unchanged; exits 0 if none |
-| `sync [--quiet]` | make links match the manifest; idempotent; never fails a session start; no-op (creates nothing) without a manifest |
-| `status` | skills, approval, linked here, last used, cap usage |
-| `prune [--cap N]` | unlink LRU skills down to the cap (on demand only) |
+| `sync [--quiet]` | make links match the manifest (never writes it); idempotent; no-op (creates nothing) without a manifest |
+| `status` | skills, approval, manifest, linked here, check result, last used, cap usage |
+| `prune [--cap N]` | unlink LRU skills down to the cap and remove them from the manifest (on demand only) |
 | `log-usage` | hook entry point: read hook JSON on stdin, append to `usage.jsonl`; always exits 0 |
 
-Global flags: `--store PATH`, `--project PATH`, `--json`. `skill-store <command> --help` is authoritative.
+Global flags (before or after the command): `--store PATH`, `--project PATH`, `--json`, plus
+`--version`. `skill-store <command> --help` is authoritative.
+
+Exit codes: `0` = ok, `1` = refused or failed, `2` = usage error. Exceptions: `log-usage` and
+`sync --quiet` always exit 0, and plain `sync` exits 1 only if an operation errored.
 
 ## Repo layout
 
@@ -483,8 +534,9 @@ Global flags: `--store PATH`, `--project PATH`, `--json`. `skill-store <command>
 |---|---|
 | `skillstore/` | the Python CLI (`skill-store`, `python -m skillstore`) |
 | `bin/` | thin `skill-store.ps1` / `.sh` / `.cmd` wrappers |
-| `schemas/`, `examples/` | JSON Schemas; example manifest, `store.json`, build recipe |
-| `tests/` | tests for link/unlink/sync/prune safety (`pytest`) |
+| `schemas/`, `examples/` | JSON Schemas (manifest, store, usage record, recipe); example manifest, `store.json`, recipes |
+| `tests/` | tests for link/unlink/sync/prune safety and the build pipeline: `pip install -e ".[test]"` then `pytest` |
+| `.github/workflows/` | CI: ubuntu + windows × Python 3.10 / 3.12 |
 | `hooks/` | Claude Code hook wrappers (`log-usage`, `sync --quiet`) |
 | `snippets/` | `settings.json` snippets (Windows, Linux, direct), CLAUDE.md safety section, AO worktree setup |
 | `docs/` | [design rationale](docs/design.md), [build recipe](docs/build-recipe.md), [schemas](docs/schemas.md), [verification checklist](docs/verification.md) |

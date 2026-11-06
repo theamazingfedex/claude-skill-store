@@ -100,14 +100,21 @@ These are enforced by `skill-store check` before linking. They are looser than t
 
 - description **≤ 500 chars**, use case first, **quoted** YAML;
 - `SKILL.md` **≤ 4k tokens** (measured as chars / 4);
-- each reference file **≤ 25k tokens** (what one Read returns), with a table of contents.
+- each reference file **≤ 25k tokens** (what one Read returns), with a table of contents
+  (required for files over 100 lines).
 
 ### Cap and pruning
 
 - Default cap: **8 linked domain skills per project**. The manifest can override it.
 - Linking beyond the cap **automatically unlinks the least recently used** skill (from the usage
-  log) and reports which. That is the only pruning signal.
+  log) and reports which. That is the only pruning signal. The evicted skill is also dropped from
+  the manifest, or the next `sync` would re-link it.
 - Otherwise pruning runs **on demand** (`skill-store prune`). There is no schedule.
+- `sync` runs at every session start in every checkout, so it **never writes the manifest** (no
+  surprise git diffs). If the manifest lists more than the cap, `sync` links the most recently used
+  and reports the rest.
+- Recency is global: the latest use of a skill in any project or worktree. Never-used skills count
+  as least recent.
 
 ### Usage tracking
 

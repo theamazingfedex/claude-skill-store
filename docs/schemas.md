@@ -33,26 +33,34 @@ Committed in the project.
 {
   "version": 1,
   "cap": 8,
-  "skills": ["godot-asset-pipeline", "gltf-2-subset"]
+  "skills": ["godot47-asset-pipeline"]
 }
 ```
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `version` | integer, `1` | yes | Schema version |
-| `cap` | integer ≥ 1 | no (default **8**) | Max linked domain skills for this project. Linking past it unlinks the least recently used |
-| `skills` | array of skill names | yes | Skills to link. `sync` creates missing links (approved skills only) and removes store links not listed |
+| `$schema` | string | no | Optional pointer to `schemas/manifest.schema.json` for editors |
+| `version` | `1` | yes | Schema version |
+| `cap` | integer | no (default **8**) | Max linked store skills in this project. `link` past it unlinks the least recently used and drops them from `skills` |
+| `skills` | array of skill names | yes | Skills to link. `sync` links those that are approved and pass `check` (up to `cap`, most recently used first) and removes store links not listed |
 
-`link` and `unlink` edit this file for you. Editing it by hand and running `sync` is equivalent.
+Skill names: lowercase letters, digits and single hyphens, starting and ending with a letter or
+digit, at most 64 chars.
+
+Who writes it: `init-project` creates it. `link`, `unlink <name>` and `prune` edit it. **`sync`
+and `unlink --all` never write it**, so session starts and worktree removal don't create git diffs.
+Editing it by hand and running `sync` is fine.
 
 ## `.claude/skills/.gitignore`
 
 ```gitignore
+# Managed by skill-store: links into the skill store are never committed.
 *
 !.gitignore
 ```
 
-Created by `init-project`, `link` and `sync` if missing. Commit it. It keeps links (and, because git
+Created by `init-project` and `link` if missing (`sync` creates nothing in a project without a
+manifest). An existing file is never modified; `sync` warns if it lacks `*`. Commit it. It keeps links (and, because git
 follows junctions, the store's third-party content) out of the repo, and makes sure the directory
 exists at session start so Claude Code live-reloads link changes.
 
@@ -62,7 +70,7 @@ exists at session start so Claude Code live-reloads link changes.
 {
   "version": 1,
   "skills": {
-    "godot-asset-pipeline": {
+    "godot47-asset-pipeline": {
       "source": "https://docs.godotengine.org/en/4.7/tutorials/assets_pipeline/",
       "version": "4.7",
       "pinned_url": null,
@@ -77,7 +85,7 @@ exists at session start so Claude Code live-reloads link changes.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `source` | string | Where the content came from (docs URL, repo, "hand-written" …) |
+| `source` | string | Where the content came from (docs URL, repo …). `"manual"` for hand-written skills registered by `approve` |
 | `version` | string \| null | Upstream version the build reflects |
 | `pinned_url` | string \| null | Exact URL scraped, if pinned |
 | `built_at` | ISO 8601 \| null | Last successful build |
@@ -90,15 +98,27 @@ exists at session start so Claude Code live-reloads link changes.
 One JSON object per line, appended by `skill-store log-usage`:
 
 ```json
-{"skill": "godot-asset-pipeline", "session": "abc123", "project": "E:\\Development\\my-game", "time": "2026-11-05T15:30:42Z"}
+{"skill": "godot47-asset-pipeline", "session": "abc123", "project": "E:/Development/my-game", "time": "2026-11-05T15:30:42Z"}
 ```
+
+Schema: [`schemas/usage-record.schema.json`](../schemas/usage-record.schema.json). `log-usage`
+never creates a store, logs unknown or plugin skills without registering them, and always exits 0.
+LRU uses the latest entry per skill **across all projects** (AO worktree paths differ per worktree),
+falling back to `store.json` `last_used`.
 
 | Field | Type | Source |
 |---|---|---|
 | `skill` | string | Hook input `tool_input.skill` (or `tool_input.command`) |
 | `session` | string \| null | Hook input `session_id` |
-| `project` | string \| null | Resolved project root (`CLAUDE_PROJECT_DIR` / hook `cwd`) |
+| `project` | string \| null | `$CLAUDE_PROJECT_DIR`, falling back to the hook payload's `cwd` (forward slashes) |
 | `time` | ISO 8601 | When the hook ran |
+
+## Build recipe
+
+See [build-recipe.md](build-recipe.md#recipe) and
+[`schemas/recipe.schema.json`](../schemas/recipe.schema.json). Required: `recipe_version` (`1`),
+`name`, `description`, `skill_seekers.config`. Optional: `frontmatter`, `source`, `version`,
+`pinned_url`, `max_reference_tokens` (default 20000, max 25000).
 
 ## Hook input (what Claude Code sends on stdin)
 
@@ -110,7 +130,7 @@ One JSON object per line, appended by `skill-store log-usage`:
   "cwd": "E:\\Development\\my-game",
   "hook_event_name": "PostToolUse",
   "tool_name": "Skill",
-  "tool_input": { "skill": "godot-asset-pipeline" },
+  "tool_input": { "skill": "godot47-asset-pipeline" },
   "tool_use_id": "toolu_01…"
 }
 ```

@@ -1,3 +1,0 @@
-# Shell scripts must stay LF even on Windows checkouts (core.autocrlf=true),
-# or Git Bash fails with "$'\r': command not found" when a hook runs them.
-*.sh text eol=lf
