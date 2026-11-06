@@ -1,0 +1,33 @@
+{
+  "recipe_version": 1,
+  "name": "gltf2-spec",
+  "description": "Use when checking what a glTF 2.0 / .glb file may legally contain: the Khronos glTF 2.0 specification for asset structure, meshes, accessors, metallic-roughness PBR materials, skins, animations, coordinate system and units.",
+  "source": "https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html",
+  "version": "2.0",
+  "pinned_url": "https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html",
+  "max_reference_tokens": 20000,
+  "skill_seekers": {
+    "version": "3.1.3",
+    "config": {
+      "base_url": "https://registry.khronos.org/glTF/specs/2.0/",
+      "start_urls": [
+        "https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html"
+      ],
+      "selectors": {
+        "main_content": "div#content",
+        "title": "h1",
+        "code_blocks": "pre"
+      },
+      "url_patterns": {
+        "include": [
+          "/glTF/specs/2.0/glTF-2.0.html"
+        ],
+        "exclude": []
+      },
+      "categories": {},
+      "rate_limit": 0.5,
+      "max_pages": 3,
+      "skip_llms_txt": true
+    }
+  }
+}

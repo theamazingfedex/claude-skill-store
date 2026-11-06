@@ -1,0 +1,53 @@
+{
+  "recipe_version": 1,
+  "name": "godot47-asset-pipeline",
+  "description": "Use when exporting Blender assets for Godot 4.7 or debugging Godot glTF/.glb import: import hints and name suffixes (-col, -noimp), import configuration and advanced import settings, and retargeting 3D skeletons with BoneMap and SkeletonProfileHumanoid.",
+  "source": "https://docs.godotengine.org/en/4.7/tutorials/assets_pipeline/",
+  "version": "4.7",
+  "pinned_url": "https://docs.godotengine.org/en/4.7/tutorials/assets_pipeline/index.html",
+  "max_reference_tokens": 20000,
+  "skill_seekers": {
+    "version": "3.1.3",
+    "config": {
+      "base_url": "https://docs.godotengine.org/en/4.7/",
+      "start_urls": [
+        "https://docs.godotengine.org/en/4.7/tutorials/assets_pipeline/index.html"
+      ],
+      "selectors": {
+        "main_content": "div[role='main']",
+        "title": "h1",
+        "code_blocks": "pre"
+      },
+      "url_patterns": {
+        "include": [
+          "/en/4.7/tutorials/assets_pipeline/"
+        ],
+        "exclude": [
+          "/_static/",
+          "/_images/",
+          "search.html"
+        ]
+      },
+      "categories": {
+        "importing_3d": [
+          "importing_3d_scenes",
+          "import_configuration",
+          "node_type_customization",
+          "available_formats"
+        ],
+        "retargeting": [
+          "retargeting"
+        ],
+        "other_import": [
+          "importing_images",
+          "importing_audio",
+          "importing_translations",
+          "import_process"
+        ]
+      },
+      "rate_limit": 0.5,
+      "max_pages": 40,
+      "skip_llms_txt": true
+    }
+  }
+}

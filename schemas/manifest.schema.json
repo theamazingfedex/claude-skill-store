@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/theamazingfedex/claude-skill-store/schemas/manifest.schema.json",
+  "title": "skill-store project manifest (.claude/skills.manifest.json)",
+  "description": "Skills a project wants linked from the user's skill store. Committed to the project; the links themselves never are.",
+  "type": "object",
+  "required": ["version", "skills"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"type": "string"},
+    "version": {"const": 1},
+    "cap": {
+      "description": "Maximum number of store skills linked into this project at once. Default 8. Linking beyond it unlinks the least recently used skill.",
+      "type": "integer",
+      "minimum": 0,
+      "default": 8
+    },
+    "skills": {
+      "description": "Skill names, in the order they were added (earlier = older; used to break LRU ties).",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$",
+        "maxLength": 64
+      }
+    }
+  }
+}

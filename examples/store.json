@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "godot47-asset-pipeline": {
+      "source": "https://docs.godotengine.org/en/4.7/tutorials/assets_pipeline/",
+      "version": "4.7",
+      "pinned_url": "https://docs.godotengine.org/en/4.7/tutorials/assets_pipeline/index.html",
+      "built_at": "2026-11-05T14:07:00Z",
+      "approved": true,
+      "approved_at": "2026-11-05T15:00:00Z",
+      "last_used": "2026-11-05T16:20:31Z"
+    },
+    "gltf2-spec": {
+      "source": "https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html",
+      "version": "2.0",
+      "pinned_url": "https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html",
+      "built_at": "2026-11-05T14:12:00Z",
+      "approved": false,
+      "approved_at": null,
+      "last_used": null
+    }
+  }
+}

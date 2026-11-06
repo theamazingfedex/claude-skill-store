@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Tests
+        run: python -m pytest -v
+      - name: CLI smoke test (temp store and project)
+        shell: bash
+        env:
+          SKILL_STORE_HOME: ${{ runner.temp }}/store
+        run: |
+          set -eu
+          proj="$RUNNER_TEMP/proj"
+          mkdir -p "$proj"
+          skill-store --version
+          skill-store init
+          skill-store init-project --project "$proj"
+          skill-store sync --quiet --project "$proj"
+          skill-store unlink --all --project "$proj"
+          skill-store status --project "$proj"
+          echo '{"tool_name":"Skill","tool_input":{"skill":"x"}}' | skill-store log-usage
+          echo 'garbage' | skill-store log-usage
+          sh bin/skill-store.sh --version
+      - name: Wrapper smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./bin/skill-store.ps1 --version
+          cmd /c "bin\skill-store.cmd --version"
