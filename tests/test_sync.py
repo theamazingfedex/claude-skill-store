@@ -108,7 +108,7 @@ def test_sync_replaces_store_link_with_wrong_target(env):
     env.skills_dir.mkdir(parents=True)
     links.create_link(env.skills_dir / "alpha", env.store.paths.skills / "beta")
     rc, r, _ = env.json("sync")
-    assert rc == 0 and r["removed"] == ["alpha"] and r["linked"] == ["alpha"]
+    assert rc == 0 and r["relinked"] == ["alpha"] and r["removed"] == [] and r["linked"] == []
     assert links.same_target(env.skills_dir / "alpha", env.store.paths.skills / "alpha")
 
 
@@ -118,7 +118,8 @@ def test_sync_unlinks_skill_that_now_fails_admission(env):
     env.run("sync")
     (d / "SKILL.md").write_text("---\nname: alpha\ndescription: Use when working with alpha\n---\n")
     rc, r, _ = env.json("sync")
-    assert "alpha" in r["failed_check"] and r["removed"] == ["alpha"]
+    assert "alpha" in r["failed_check"] and r["unlinked_failed_check"] == ["alpha"]
+    assert r["removed"] == []
     assert (d / "SKILL.md").is_file()
 
 
@@ -135,3 +136,57 @@ def test_sync_over_cap_links_most_recent_and_keeps_manifest(env):
     assert env.manifest()["skills"] == ["a1", "a2", "a3"]  # sync never edits the manifest
     rc, r, _ = env.json("sync")
     assert r["linked"] == [] and r["removed"] == []
+
+
+def _categories(r):
+    keys = ("linked", "relinked", "already", "removed", "unlinked_over_cap",
+            "unlinked_failed_check", "unlinked_unavailable", "conflicts")
+    return {k: sorted(r[k]) for k in keys if r[k]}
+
+
+def test_sync_report_categories_when_manifest_exceeds_cap(env):
+    """A listed skill pushed over the cap is reported only as over cap, never as 'no longer listed'."""
+    for n in ("verify-alpha", "verify-beta", "verify-gamma", "gone"):
+        env.add_skill(n)
+    env.write_manifest(["verify-alpha", "verify-beta", "gone"], cap=3)
+    env.run("sync")
+    env.log_use("verify-alpha", "2026-11-03T00:00:00Z")
+    env.log_use("verify-gamma", "2026-11-04T00:00:00Z")
+    env.log_use("gone", "2026-11-05T00:00:00Z")
+    # verify-beta (never used) is now the LRU listed skill; 'gone' is dropped from the manifest.
+    env.write_manifest(["verify-alpha", "verify-beta", "verify-gamma"], cap=2)
+    rc, r, _ = env.json("sync")
+    assert rc == 0
+    assert _categories(r) == {"already": ["verify-alpha"], "linked": ["verify-gamma"],
+                              "removed": ["gone"], "unlinked_over_cap": ["verify-beta"]}
+    assert r["over_cap"] == ["verify-beta"]
+    rc, out, _ = env.run("sync")  # second run: nothing changes, beta is over cap and not linked
+    assert rc == 0
+    assert "no longer listed" not in out
+    assert out.count("verify-beta") == 1 and "over cap, not linked: verify-beta" in out
+
+
+def test_sync_text_reports_over_cap_unlink_once(env):
+    for n in ("verify-alpha", "verify-beta"):
+        env.add_skill(n)
+    env.write_manifest(["verify-alpha", "verify-beta"])
+    env.run("sync")
+    env.log_use("verify-alpha", "2026-11-03T00:00:00Z")
+    env.write_manifest(["verify-alpha", "verify-beta"], cap=1)
+    rc, out, _ = env.run("sync")
+    assert rc == 0
+    assert "no longer listed" not in out
+    assert out.count("verify-beta") == 1
+    assert "over cap, unlinked (least recently used; store copy untouched): verify-beta" in out
+
+
+def test_sync_report_unavailable_listed_skill(env):
+    env.add_skill("alpha")
+    env.write_manifest(["alpha"])
+    env.run("sync")
+    data = env.store.load()
+    data["skills"]["alpha"]["approved"] = False
+    env.store.save(data)
+    rc, r, _ = env.json("sync")
+    assert _categories(r) == {"unlinked_unavailable": ["alpha"]}
+    assert r["needs_approval"] == ["alpha"]

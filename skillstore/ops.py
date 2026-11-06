@@ -213,9 +213,10 @@ def unlink_all(ctx: Ctx) -> dict:
 
 
 def sync(ctx: Ctx) -> dict:
-    result = {"project": str(ctx.project.root), "linked": [], "already": [], "removed": [],
-              "needs_approval": [], "missing": [], "failed_check": {}, "over_cap": [],
-              "conflicts": [], "errors": [], "warnings": []}
+    result = {"project": str(ctx.project.root), "linked": [], "relinked": [], "already": [],
+              "removed": [], "unlinked_over_cap": [], "unlinked_failed_check": [],
+              "unlinked_unavailable": [], "needs_approval": [], "missing": [],
+              "failed_check": {}, "over_cap": [], "conflicts": [], "errors": [], "warnings": []}
     if not ctx.store.paths.exists():
         result["skipped"] = f"no skill store at {ctx.store.paths.root}"
         return result
@@ -245,19 +246,31 @@ def sync(ctx: Ctx) -> dict:
     keep = set(keep_sorted[: manifest.cap])
     result["over_cap"] = [n for n in manifest.skills if n in ok and n not in keep]
 
+    # Every removed store link is reported under exactly one reason.
+    listed = set(manifest.skills)
+    relink = set()
     for name, lp in store_links(ctx).items():
-        try:
-            valid_name = True
-            validate_name(name)
-        except SkillStoreError:
-            valid_name = False
-        if valid_name and name in keep and same_target(lp, ctx.store.paths.skill(name)):
+        if name in keep and same_target(lp, ctx.store.paths.skill(name)):
             continue
+        if name in keep:
+            reason = "relink"  # listed and linkable, but pointing at the wrong store skill
+        elif name not in listed:
+            reason = "removed"  # no longer listed in the manifest
+        elif name in result["over_cap"]:
+            reason = "unlinked_over_cap"
+        elif name in result["failed_check"]:
+            reason = "unlinked_failed_check"
+        else:
+            reason = "unlinked_unavailable"  # listed, but not in store or not approved
         try:
             remove_link(lp)
-            result["removed"].append(name)
         except SkillStoreError as exc:
             result["errors"].append(str(exc))
+            continue
+        if reason == "relink":
+            relink.add(name)
+        else:
+            result[reason].append(name)
 
     for name in [n for n in manifest.skills if n in keep]:
         lp = ctx.project.link(name)
@@ -268,7 +281,7 @@ def sync(ctx: Ctx) -> dict:
                 result["conflicts"].append(name)
             else:
                 create_link(lp, ctx.store.paths.skill(name))
-                result["linked"].append(name)
+                result["relinked" if name in relink else "linked"].append(name)
         except SkillStoreError as exc:
             result["errors"].append(f"{name}: {exc}")
         except OSError as exc:

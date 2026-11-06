@@ -86,8 +86,15 @@ def _fmt_sync(r: dict) -> str:
     if r.get("skipped"):
         return f"sync: nothing to do ({r['skipped']})"
     lines = []
-    for key, label in (("linked", "linked"), ("removed", "unlinked (no longer listed)"),
-                       ("already", "already linked"), ("over_cap", "over cap, not linked"),
+    r = dict(r)
+    # over_cap lists every listed skill beyond the cap; show each once, by what happened to it.
+    r["over_cap_not_linked"] = [n for n in r.get("over_cap", []) if n not in r.get("unlinked_over_cap", [])]
+    for key, label in (("linked", "linked"), ("relinked", "relinked (pointed at the wrong store skill)"),
+                       ("removed", "unlinked (no longer listed)"),
+                       ("unlinked_over_cap", "over cap, unlinked (least recently used; store copy untouched)"),
+                       ("unlinked_failed_check", "unlinked (now fails admission)"),
+                       ("unlinked_unavailable", "unlinked (not in store or not approved)"),
+                       ("already", "already linked"), ("over_cap_not_linked", "over cap, not linked"),
                        ("needs_approval", "needs approval (skill-store approve <name>)"),
                        ("missing", "not in store (build it)"), ("conflicts",
                        "name taken by a non-store entry, left alone")):
