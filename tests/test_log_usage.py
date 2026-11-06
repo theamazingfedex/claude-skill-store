@@ -84,3 +84,45 @@ def test_subprocess_exit_0(env, tmp_path):
                              text=True, capture_output=True, env=envvars, cwd=str(tmp_path))
         assert res.returncode == 0, res.stderr
     assert [r["skill"] for r in _usage(env)] == ["alpha"]
+
+
+class _NoRead(io.StringIO):
+    def read(self, *a):
+        raise AssertionError("stdin must not be read for a non-log-usage command")
+
+
+def test_skill_named_log_usage_is_not_the_hook(env, monkeypatch):
+    """`log-usage` is a valid skill name: link/approve/unlink/check of it must run normally."""
+    monkeypatch.setattr(sys, "stdin", _NoRead())
+    env.add_skill("log-usage", approved=False)
+    rc, _, err = env.run("link", "log-usage")
+    assert rc == 1 and "skill-store approve log-usage" in err  # real error, not a silent 0
+    assert env.run("approve", "log-usage")[0] == 0
+    assert env.store.load()["skills"]["log-usage"]["approved"] is True
+    rc, out, _ = env.run("link", "log-usage")
+    assert rc == 0 and "linked" in out
+    assert (env.skills_dir / "log-usage" / "SKILL.md").is_file()
+    assert env.run("check", "log-usage")[0] == 0
+    rc, out, _ = env.run("unlink", "log-usage")
+    assert rc == 0 and "unlinked" in out
+    assert _usage(env) == []
+
+
+def test_project_named_log_usage_is_not_the_hook(env, monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(sys, "stdin", _NoRead())
+    env.store.init()
+    rc = cli.main(["--project", str(tmp_path / "log-usage"), "link", "ghost"])
+    assert rc == 1 and "not in the store" in capsys.readouterr().err
+    rc = cli.main(["--project", "log-usage", "link", "ghost"])
+    assert rc == 1
+
+
+def test_log_usage_after_global_options(env, monkeypatch, capsys):
+    env.add_skill("alpha")
+    rc, _, _ = _run(monkeypatch, capsys, json.dumps({"tool_name": "Skill", "tool_input": {"skill": "alpha"}}))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_name": "Skill", "tool_input": {"skill": "alpha"}})))
+    rc = cli.main(["--store", str(env.store_root), "log-usage"])
+    assert rc == 0
+    assert [r["skill"] for r in _usage(env)] == ["alpha", "alpha"]
+    rc = cli.main(["--store", str(env.store_root), "log-usage", "--bogus"])
+    assert rc == 0

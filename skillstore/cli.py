@@ -171,15 +171,39 @@ def _log_usage_main(args) -> int:
     return 0
 
 
+_VALUE_OPTIONS = ("--store", "--project")
+
+
+def _subcommand(argv: list[str]) -> str | None:
+    """The first non-option token, skipping the values of global options (``--store X``).
+    Used only to decide, before parsing, whether bad arguments must still exit 0."""
+    skip = False
+    for tok in argv:
+        if skip:
+            skip = False
+            continue
+        if tok in _VALUE_OPTIONS:
+            skip = True
+            continue
+        if tok == "--":
+            return None
+        if tok.startswith("-"):
+            continue
+        return tok
+    return None
+
+
 def run(argv: list[str]) -> int:
     parser = build_parser()
-    if "log-usage" in argv:
+    if _subcommand(argv) == "log-usage":
         try:
             args = parser.parse_args(argv)
         except SystemExit:
-            return 0
+            return 0  # the hook must never fail the tool call, even on bad arguments
+    else:
+        args = parser.parse_args(argv)
+    if args.command == "log-usage":
         return _log_usage_main(args)
-    args = parser.parse_args(argv)
     as_json = bool(getattr(args, "json", False))
     cmd = args.command
     if cmd == "sync":
@@ -287,7 +311,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return run(argv)
     except SkillStoreError as exc:
-        if "log-usage" in argv:
+        if _subcommand(argv) == "log-usage":
             return 0
         print(f"skill-store: error: {exc}", file=sys.stderr)
         return 1
