@@ -122,3 +122,31 @@ def test_promote_keeps_links_valid(tmp_path):
     postprocess.promote(staging, dest, tmp_path / "store" / "build" / "s" / "previous")
     assert (lp / "SKILL.md").read_text() == "v2"
     assert (tmp_path / "store" / "build" / "s" / "previous" / "SKILL.md").read_text() == "v1"
+
+
+def test_promote_failure_keeps_old_skill_live(tmp_path, monkeypatch):
+    from skillstore import links
+    from skillstore.paths import SkillStoreError
+    dest = tmp_path / "store" / "skills" / "s"
+    dest.mkdir(parents=True)
+    (dest / "SKILL.md").write_text("v1")
+    lp = tmp_path / "proj" / "s"
+    links.create_link(lp, dest)
+    bdir = tmp_path / "store" / "build" / "s"
+    staging = bdir / "staging"
+    staging.mkdir(parents=True)
+    (staging / "SKILL.md").write_text("v2")
+    real_replace = postprocess.os.replace
+
+    def failing(src, dst):
+        if str(src) == str(staging):
+            raise PermissionError(13, "in use by another process", str(src))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(postprocess.os, "replace", failing)
+    with pytest.raises(SkillStoreError, match="previous version is still live"):
+        postprocess.promote(staging, dest, bdir / "previous")
+    assert (dest / "SKILL.md").read_text() == "v1"
+    assert (lp / "SKILL.md").read_text() == "v1"  # project link does not dangle
+    assert (staging / "SKILL.md").read_text() == "v2"  # kept for inspection
+    assert not (bdir / "previous").exists()

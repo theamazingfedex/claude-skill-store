@@ -264,8 +264,8 @@ def sync(ctx: Ctx) -> dict:
             reason = "unlinked_unavailable"  # listed, but not in store or not approved
         try:
             remove_link(lp)
-        except SkillStoreError as exc:
-            result["errors"].append(str(exc))
+        except (SkillStoreError, OSError) as exc:  # e.g. a junction locked by AV/indexer
+            result["errors"].append(f"{name}: {exc}")
             continue
         if reason == "relink":
             relink.add(name)
@@ -363,9 +363,8 @@ def log_usage(store_root: Path, stdin_text: str, environ=None) -> dict:
         "project": environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd"),
         "time": now_iso(),
     }
+    # Append only. The hook runs in many sessions at once; a read-modify-write of store.json
+    # here would race with approve/build and lose updates. usage.jsonl is authoritative for
+    # recency; store.json ``last_used`` is refreshed from it whenever a command saves store.json.
     store.append_usage(record)
-    data = store.load()
-    if skill in data["skills"]:
-        data["skills"][skill]["last_used"] = record["time"]
-        store.save(data)
     return {"logged": True, "record": record}

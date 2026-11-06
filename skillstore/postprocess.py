@@ -393,8 +393,20 @@ def promote(staging: Path, dest: Path, previous: Path) -> None:
             raise SkillStoreError(f"refusing to replace {p}: it is a link, expected a store directory")
     if previous.exists():
         shutil.rmtree(previous)  # an old backup inside the store's build/<name>/ dir
+    moved_old = False
     if dest.exists():
         previous.parent.mkdir(parents=True, exist_ok=True)
         os.replace(dest, previous)
+        moved_old = True
     dest.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(staging, dest)
+    try:
+        os.replace(staging, dest)
+    except OSError as exc:
+        # e.g. PermissionError on Windows while Defender/indexer holds a new file open.
+        # Put the old skill back so project links never dangle; keep staging for inspection.
+        if moved_old and not os.path.lexists(dest):
+            os.replace(previous, dest)
+        raise SkillStoreError(
+            f"could not move the rebuilt skill into place ({exc}); the previous version is "
+            f"still live at {dest}; the new build is left in {staging}"
+        ) from exc

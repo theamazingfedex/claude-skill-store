@@ -111,6 +111,12 @@ class Store:
         return data
 
     def save(self, data: dict) -> None:
+        """Write store.json, folding the latest use from usage.jsonl into ``last_used``
+        (the usage hook itself only appends to usage.jsonl and never writes store.json)."""
+        latest = self.last_used_map(data)
+        for name, entry in data["skills"].items():
+            if name in latest:
+                entry["last_used"] = latest[name].isoformat().replace("+00:00", "Z")
         write_json(self.paths.store_json, data)
 
     def entry(self, data: dict, name: str, create: bool = False) -> dict | None:

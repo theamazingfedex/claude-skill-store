@@ -190,3 +190,28 @@ def test_sync_report_unavailable_listed_skill(env):
     rc, r, _ = env.json("sync")
     assert _categories(r) == {"unlinked_unavailable": ["alpha"]}
     assert r["needs_approval"] == ["alpha"]
+
+
+def test_sync_continues_when_one_link_removal_raises_oserror(env, monkeypatch):
+    """A locked junction (PermissionError) is reported; the rest of the sync still runs."""
+    from skillstore import ops
+    for n in ("aa", "bb", "cc"):
+        env.add_skill(n)
+    env.write_manifest(["aa", "bb"])
+    env.run("sync")
+    env.write_manifest(["cc"])
+    real_remove = ops.remove_link
+
+    def flaky(path):
+        if os.path.basename(str(path)) == "aa":
+            raise PermissionError(13, "The process cannot access the file", str(path))
+        return real_remove(path)
+
+    monkeypatch.setattr(ops, "remove_link", flaky)
+    rc, r, _ = env.json("sync")
+    assert rc == 1
+    assert len(r["errors"]) == 1 and r["errors"][0].startswith("aa:")
+    assert r["removed"] == ["bb"] and r["linked"] == ["cc"]
+    assert links.is_link(env.skills_dir / "aa")  # left in place, reported
+    rc, out, err = env.run("sync", "--quiet")
+    assert rc == 0 and out == "" and "aa:" in err

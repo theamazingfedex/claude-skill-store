@@ -36,7 +36,27 @@ def test_logs_skill_call_and_updates_last_used(env, monkeypatch, capsys):
     assert len(recs) == 1
     assert recs[0]["skill"] == "alpha" and recs[0]["session"] == "sess-1"
     assert recs[0]["project"] == str(env.project) and recs[0]["time"].endswith("Z")
+    # store.json is folded in on the next command that writes it, not by the hook
+    env.run("approve", "alpha")
     assert env.store.load()["skills"]["alpha"]["last_used"] == recs[0]["time"]
+
+
+def test_hook_never_writes_store_json(env, monkeypatch, capsys):
+    """Parallel hooks must not read-modify-write store.json (lost updates vs approve/build)."""
+    env.add_skill("alpha", approved=False)
+    before = env.store.paths.store_json.read_bytes()
+    stale = env.store.load()  # what a racing hook would have loaded
+    for _ in range(3):
+        rc, _, _ = _run(monkeypatch, capsys, json.dumps({"tool_name": "Skill", "tool_input": {"skill": "alpha"}}))
+        assert rc == 0
+    assert env.store.paths.store_json.read_bytes() == before
+    env.run("approve", "alpha")  # an approve interleaved with hooks survives them
+    _run(monkeypatch, capsys, json.dumps({"tool_name": "Skill", "tool_input": {"skill": "alpha"}}))
+    data = env.store.load()
+    assert data["skills"]["alpha"]["approved"] is True
+    assert stale["skills"]["alpha"]["approved"] is False
+    rc, r, _ = env.json("status")
+    assert r["skills"][0]["last_used"] is not None  # recency still comes from usage.jsonl
 
 
 def test_command_form_and_unknown_skill(env, monkeypatch, capsys):
