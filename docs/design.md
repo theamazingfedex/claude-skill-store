@@ -49,7 +49,7 @@ The store stays **out of** `~/.claude/skills`, `~/.agents` and every project rep
 - `~/.agents` is owned by the vercel `skills` CLI.
 
 The store is not a git repo of content either: scraped docs are third-party text under their own
-licences (e.g. CC BY, or a vendor's copyright).
+licenses (e.g. CC BY, or a vendor's copyright).
 
 ### Linking at project scope
 
