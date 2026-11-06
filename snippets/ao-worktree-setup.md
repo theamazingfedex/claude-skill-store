@@ -78,3 +78,7 @@ guaranteed, use the wrapper snippets or the exec form with the full path plus `-
 
 In a project without `.claude/skills.manifest.json`, `sync` does nothing and creates nothing, so a
 user-level hook is harmless in unrelated projects.
+
+A project-level hook runs only after the folder is trusted. Interactively, a new worktree path
+gets the trust dialog with **"No, exit"** as the default, and hooks don't run until it is accepted.
+That's one more reason to sync in `--post-create` rather than rely on the hook.

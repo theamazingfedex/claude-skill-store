@@ -126,8 +126,10 @@ in PowerShell, so `export` it again there, or pass `--store` explicitly (the `ss
 
 ### 1. Project-scope link is discovered
 
-Start `claude` in `$proj` and accept the workspace-trust prompt if it appears. (In `-p` mode,
-project hooks run without one.)
+Start `claude` in `$proj`. The interactive TUI asks whether you trust the folder, with **"No, exit"
+selected by default**: choose to trust it. Project hooks (the usage hook and the SessionStart sync)
+run only after that. The same prompt appears for the worktree in step 6 and the `E:` project in
+step 5. In `-p` mode, project hooks ran without a prompt.
 
 - [ ] `/skills` lists **verify-alpha** (and not verify-beta).
 - [ ] Ask *"What does zorblax-verify-alpha mean?"*. Claude invokes the skill and answers "the store link works".

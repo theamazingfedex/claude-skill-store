@@ -363,11 +363,30 @@ Merge [`snippets/settings.linux.json`](snippets/settings.linux.json) into `~/.cl
   form with the full path plus `--store`:
   `{"type": "command", "command": "C:/…/venv/Scripts/skill-store.exe", "args": ["--store", "C:/…/store", "log-usage"]}`.
 
+**Workspace trust.** Project-level hooks (in a project's `.claude/settings.json`) run only in a folder you
+have trusted. In the interactive TUI, a new folder (including a new worktree path) shows "Is this a
+project you created or one you trust?" with **"No, exit" selected by default**. Until you choose to
+trust it, neither the SessionStart sync nor the usage hook runs. Claude Code records the choice in
+`~/.claude.json`. In `claude -p` mode, project hooks ran without a prompt. User-level hooks in
+`~/.claude/settings.json` don't depend on this.
+
 ### AO worktrees
 
-New worktrees start without links. **Sync before Claude Code starts**: an AO
-`--post-create "skill-store sync"` step, or `skill-store sync` in your launcher. Links created that
-way are seen on the first prompt.
+New worktrees start without links. **Always run `skill-store sync` before launching `claude` in a
+fresh checkout or worktree.** Use an AO `--post-create "skill-store sync"` step, or a small launch
+wrapper. Links created that way are seen on the first prompt:
+
+```powershell
+# Windows: e.g. a function in your PowerShell profile
+function claude-ss { skill-store sync; claude @args }
+```
+```bash
+# Linux: e.g. in ~/.bashrc
+claude-ss() { skill-store sync; claude "$@"; }
+```
+
+`sync` exits 0 when there's nothing to do, and the wrapper starts `claude` even if `sync` reports a
+problem.
 
 The SessionStart hook alone is **not enough** for a fresh checkout. It does create the links, but the
 session has already scanned its skills by then. Verified on Windows: in the interactive TUI (Claude
