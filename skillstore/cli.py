@@ -162,9 +162,20 @@ def _fmt_pp(name: str, r: dict) -> str:
     return "\n".join(lines)
 
 
+def _read_hook_stdin() -> str:
+    """Hook JSON from stdin as UTF-8, tolerating a BOM. Bytes are decoded explicitly so a
+    Windows locale code page never mangles the payload."""
+    if sys.stdin is None or sys.stdin.isatty():
+        return ""
+    buf = getattr(sys.stdin, "buffer", None)
+    if buf is not None:
+        return buf.read().decode("utf-8-sig", errors="replace")
+    return sys.stdin.read()
+
+
 def _log_usage_main(args) -> int:
     try:
-        data = sys.stdin.read() if not sys.stdin.isatty() else ""
+        data = _read_hook_stdin()
         ops.log_usage(resolve_store(getattr(args, "store", None)), data)
     except BaseException:  # noqa: BLE001 - the hook must never fail the tool call
         pass

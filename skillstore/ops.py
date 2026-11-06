@@ -343,6 +343,7 @@ def status(ctx: Ctx) -> dict:
 def log_usage(store_root: Path, stdin_text: str, environ=None) -> dict:
     """Hook entry point. Callers must swallow every exception (the hook must never fail)."""
     environ = os.environ if environ is None else environ
+    stdin_text = stdin_text.lstrip("﻿")  # a UTF-8 BOM would otherwise fail the JSON parse
     try:
         payload = json.loads(stdin_text) if stdin_text.strip() else {}
     except ValueError:
