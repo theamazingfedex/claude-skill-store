@@ -6,7 +6,8 @@
 # - Creates (or reuses) a venv in the temp dir, never in the repo: ${TMPDIR:-/tmp}/skill-store-test-venv.
 #   If the system Python has no ensurepip (e.g. Kali/Debian without python3-venv), the venv is
 #   made with --without-pip and pip is bootstrapped from https://bootstrap.pypa.io/get-pip.py.
-#   No sudo, no system packages.
+#   No sudo, no system packages. An existing --venv DIR is only ever replaced if it is a venv
+#   (contains pyvenv.cfg, not a symlink); anything else is refused (exit 2), never deleted.
 # - Installs the checkout with `pip install -e ".[test]"` and runs pytest.
 # - If the checkout is on a Windows drive (/mnt/<drive>/...), it is first copied to a temp dir
 #   (without .git and build junk), so pip/pytest never write into the Windows checkout.
@@ -29,7 +30,7 @@ while [ $# -gt 0 ]; do
     --python) py="$2"; shift 2 ;;
     --other-volume) other="$2"; shift 2 ;;
     --) shift; break ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
     *) echo "test-local.sh: unknown argument: $1 (pytest args go after --)" >&2; exit 2 ;;
   esac
 done
@@ -40,13 +41,26 @@ fi
 command -v "$py" >/dev/null 2>&1 || { echo "test-local.sh: $py not found (need Python >= 3.10)" >&2; exit 2; }
 
 # ---- venv in the temp dir --------------------------------------------------------------
+# Only ever delete a directory that is clearly a venv (has pyvenv.cfg, not a symlink) or one
+# this run created itself. Anything else given via --venv is refused, never deleted.
+owned=0
+remove_venv() {
+  if [ ! -e "$venv" ] && [ ! -L "$venv" ]; then return 0; fi
+  if [ "$owned" -ne 1 ] && { [ -L "$venv" ] || [ ! -d "$venv" ] || [ ! -f "$venv/pyvenv.cfg" ]; }; then
+    echo "test-local.sh: --venv $venv exists and is not a venv; refusing to delete it" >&2
+    exit 2
+  fi
+  rm -rf -- "$venv"
+}
+
 vpy="$venv/bin/python"
 if [ ! -x "$vpy" ] || ! "$vpy" -m pip --version >/dev/null 2>&1; then
   echo "==> creating venv $venv ($("$py" --version 2>&1))"
-  rm -rf -- "$venv"
+  remove_venv
+  owned=1  # from here on, $venv is created by this run
   if ! "$py" -m venv "$venv" >/dev/null 2>&1; then
     echo "==> no ensurepip; creating venv --without-pip and bootstrapping pip"
-    rm -rf -- "$venv"
+    remove_venv
     "$py" -m venv --without-pip "$venv"
     getpip="${TMPDIR:-/tmp}/skill-store-get-pip.py"
     "$vpy" -c "import urllib.request,sys; urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', sys.argv[1])" "$getpip"
