@@ -10,10 +10,11 @@ new checkout or worktree starts **without** them. Something has to run `skill-st
 
 **Use the AO `--post-create` step as the primary path; the `SessionStart` hook is only a backstop.**
 A session scans its skills *before* its `SessionStart` hook runs, and doesn't pick up links the hook
-creates during startup. Verified on Windows:
-- in the interactive TUI (Claude Code 2.1.319) they stayed invisible (still missing on turn 2)
-  until `/reload-skills`;
-- in `claude -p` (2.1.318) they appeared from turn 2.
+creates during startup. Verified on Windows and Linux:
+- in the interactive TUI (Claude Code 2.1.318/2.1.319) they stayed invisible (still missing on
+  turn 2) until `/reload-skills`;
+- in `claude -p` they appeared only from the first turn that started after the file watcher saw
+  them (a few seconds after launch; turn 2 or later).
 
 Links created by `--post-create` exist before the session starts, so they are seen on the first
 prompt.

@@ -397,8 +397,9 @@ problem.
 
 The SessionStart hook alone is **not enough** for a fresh checkout. It does create the links, but the
 session has already scanned its skills by then. Verified on Windows: in the interactive TUI (Claude
-Code 2.1.319) the session **didn't pick them up at all** until `/reload-skills`. With `claude -p`
-(2.1.318) they appeared from turn 2. So keep the hook only as a backstop for later sessions, and if
+Code 2.1.319 on Windows, 2.1.318 on Linux) the session **didn't pick them up at all** until
+`/reload-skills`. With `claude -p` they appeared only from the first turn that started after Claude
+Code's file watcher saw them (a few seconds after launch; turn 2 or later). So keep the hook only as a backstop for later sessions, and if
 you rely on it, run `/reload-skills` once in that first session.
 
 As a `--pre-remove` step, an AO project can run `skill-store unlink --all`, which removes the
@@ -444,10 +445,12 @@ Verified on Windows 10 with Claude Code 2.1.318 (details in
 - ✅ a link **removed** mid-session can no longer be invoked (`Unknown skill`). ⚠️ The model isn't
   told about removals, though, so it may still name the skill until a new session starts;
 - ❌/⚠️ links created by the `SessionStart` hook **during startup** are missed by that session. In
-  the interactive TUI (2.1.319) they don't appear until `/reload-skills`; in `claude -p` (2.1.318)
-  they appear from turn 2. Links that exist **before** launch are found on turn 1. So sync before
+  the interactive TUI they don't appear until `/reload-skills`. In `claude -p` they appear from the
+  first turn that starts after the file watcher sees them (turn 2 or later). Links that exist **before** launch are found on turn 1. So sync before
   launching (AO `--post-create`): see [AO worktrees](#ao-worktrees);
 - ✅ the `PostToolUse` usage hook logs one line per Skill call; `/skill-doctor` shows per-skill cost.
+
+These results hold on both Windows 10 (junctions) and Linux (WSL2 Kali, symlinks).
 
 Run the ~15-minute checklist in [docs/verification.md](docs/verification.md) on each new OS or
 Claude Code version. It uses a scratch store, a scratch project with two tiny test skills, and
@@ -504,7 +507,8 @@ must never be committed. Delete that *file*, make sure the `.gitignore` is in pl
 - Fresh worktree or checkout, with links created by the SessionStart hook? That session misses them:
   run `/reload-skills` once, and sync before launching next time (AO `--post-create`).
 - **Listing budget:** if the listing overflows, descriptions of rarely used skills are dropped.
-  Run `/doctor` (setup check) and `/skill-doctor` (per-skill cost vs use, v2.1.252+). To free
+  Run `/skill-doctor` (per-skill cost vs use, v2.1.252+; in newer interactive versions it opens the
+  Plugins panel's Stats tab). `/doctor` is a general setup check. To free
   budget, link fewer skills, keep descriptions short and use-case-first, or set skills you rarely
   need via `skillOverrides` in `settings.json`:
 
