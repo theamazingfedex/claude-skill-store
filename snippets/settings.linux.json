@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/src/claude-skill-store/hooks/skill-store-hook.sh\" log-usage",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/src/claude-skill-store/hooks/skill-store-hook.sh\" sync --quiet",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

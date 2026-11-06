@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:/Users/YOU/src/claude-skill-store/hooks/skill-store-hook.ps1", "log-usage"],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:/Users/YOU/src/claude-skill-store/hooks/skill-store-hook.ps1", "sync", "--quiet"],
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

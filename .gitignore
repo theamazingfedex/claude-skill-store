@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+/build/
+/dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# skill-seekers working output, if a build is ever run inside the repo by mistake.
+# Scraped docs are third-party text and must never be committed.
+/output/
+quality_report.json
+.skill_version.json
+
+# A local store pointed at the repo by mistake (SKILL_STORE_HOME=./.skill-store)
+.skill-store/
+
+# Claude Code per-user state
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
