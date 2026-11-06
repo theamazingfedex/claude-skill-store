@@ -484,7 +484,7 @@ without `--quiet` (or `skill-store status`).
 Entries it didn't link are reported as:
 - `needs approval`;
 - `not in store`;
-- failing `check` (e.g. after a rebuild);
+- `fails admission, not linked` (it fails `check`, e.g. after a rebuild; the reasons follow in brackets);
 - `over cap, not linked` (more listed than the cap; the most recently used win);
 - `name taken by a non-store entry` (a real directory or a foreign link there, which `sync` never
   touches).
@@ -516,10 +516,13 @@ the files came from a download.
 **Something deleted store files.** Almost always a recursive delete through a link (see
 [Unlink safety](#unlink-safety-hard-rule)). Rebuild with `skill-store build <name> --recipe
 ~/.skill-store/build/<name>/recipe.json --skip-scrape`: the raw pages in `build/<name>/output/` make
-this cheap, unless they were deleted too. The version before the last rebuild is in
-`build/<name>/previous/`. If a rebuild can't move the new version into place (e.g. Windows
-Defender holds a file open), `build` puts the previous version back so links never dangle, and
-leaves the new build in `build/<name>/` for inspection.
+this cheap, unless they were deleted too. After a successful rebuild, the version before it is in
+`build/<name>/previous/`.
+
+If a rebuild can't move the new version into place (e.g. Windows Defender holds a file open),
+`build` puts the previous version back as the live `skills/<name>/`, so links never dangle. The new
+build is left in `build/<name>/staging/` for inspection. In that case `build/<name>/previous/` no
+longer exists: the old backup was deleted, and the live version was moved into it and back out.
 
 ## Command reference
 
