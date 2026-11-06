@@ -10,13 +10,17 @@ Commit [`settings.project.json`](settings.project.json) into the project's `.cla
 (merge it into the existing `hooks` object if there is one), or install the user-level hook from
 [`settings.windows.json`](settings.windows.json) / [`settings.linux.json`](settings.linux.json).
 Claude Code then runs `skill-store sync --quiet` at every session start, in whichever checkout
-the session opens. In a project without `.claude/skills.manifest.json`, `sync` does nothing and
+the session opens. **Caveat (verified with Claude Code 2.1.318):** the session's first skill scan
+runs before the hook, so hook-created links are usable only from the **second turn**. When the
+first prompt must see the skills, which is typical for AO workers, use the `--post-create` step
+below as well. In a project without `.claude/skills.manifest.json`, `sync` does nothing and
 creates nothing, so a user-level hook is harmless in unrelated projects.
 
 ## 2. AO `--post-create` / `--pre-remove` steps
 
 AO runs `--post-create` commands after it creates a session workspace and `--pre-remove` commands
-before it deletes one. Syncing in post-create means the links already exist when the agent starts.
+before it deletes one. Syncing in post-create means the links already exist when the agent starts,
+so its very first prompt can use them.
 Running `skill-store unlink --all` in pre-remove means that removing the worktree can't recurse
 through a junction into the store.
 
