@@ -231,7 +231,7 @@ Linux (bash):
 ```bash
 ss unlink --all --project "$V/proj-wt"; ss unlink --all --project "$V/proj-wt2"; ss unlink --all --project "$proj"
 git -C "$proj" worktree remove --force ../proj-wt; git -C "$proj" worktree remove --force ../proj-wt2
-find "$V" -type l          # must print nothing
+find "$V" -path "$V/venv" -prune -o -type l -print   # must print nothing (the venv's own symlinks are skipped)
 rm -r "$V"                 # only if the line above printed nothing
 ```
 
