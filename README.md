@@ -305,7 +305,7 @@ Two Claude Code hooks connect the store to sessions:
 
 | Hook | Matcher | Runs | Purpose |
 |---|---|---|---|
-| `PostToolUse` | `Skill` | `skill-store log-usage` | append `{skill, session, project, time}` to `usage.jsonl`, update `last_used` |
+| `PostToolUse` | `Skill` | `skill-store log-usage` | append `{skill, session, project, time}` to `usage.jsonl` (append only; it never writes `store.json`) |
 | `SessionStart` | (all) | `skill-store sync --quiet` | create this checkout's links before work starts |
 
 Both must never get in the way: `log-usage` always exits 0, and `sync --quiet` prints nothing on
@@ -478,12 +478,27 @@ must never be committed. Delete that *file*, make sure the `.gitignore` is in pl
 **`link` refuses.** It requires the skill to exist in the store, pass `check`, and be approved.
 The error says which. Run `skill-store check <name>`, then `skill-store approve <name>` (your decision).
 
-**`sync` didn't link something in the manifest.** Run `skill-store sync` without `--quiet` (or
-`skill-store status`). It lists entries that are **not approved**, **not in the store**, **failed
-check** (e.g. after a rebuild), **over cap** (more listed than the cap; the most recently used win),
-or in **conflict** (the name is taken by a real directory or a foreign link, which `sync` never
-touches). With `--quiet`, these notes go to stderr and the exit code is always 0. You can see them
-with `claude --debug`.
+**`sync` didn't link something in the manifest, or removed a link.** Run `skill-store sync`
+without `--quiet` (or `skill-store status`).
+
+Entries it didn't link are reported as:
+- `needs approval`;
+- `not in store`;
+- failing `check` (e.g. after a rebuild);
+- `over cap, not linked` (more listed than the cap; the most recently used win);
+- `name taken by a non-store entry` (a real directory or a foreign link there, which `sync` never
+  touches).
+
+Every link it removed is reported under exactly one reason:
+- `unlinked (no longer listed)`;
+- `over cap, unlinked`;
+- `unlinked (now fails admission)`;
+- `unlinked (not in store or not approved)`;
+- `relinked` (it pointed at the wrong store skill).
+
+A link that can't be removed (e.g. a junction held open by antivirus or the indexer) is reported as
+an error for that skill, and the rest of the sync continues. With `--quiet`, these notes go to
+stderr and the exit code is always 0. You can see them with `claude --debug`.
 
 **Usage isn't being logged / LRU looks wrong.** Check `/hooks` in Claude Code, and run with
 `claude --debug` to see hook output. Only Skill **tool** calls are logged: typing `/skill-name`
@@ -502,7 +517,9 @@ the files came from a download.
 [Unlink safety](#unlink-safety-hard-rule)). Rebuild with `skill-store build <name> --recipe
 ~/.skill-store/build/<name>/recipe.json --skip-scrape`: the raw pages in `build/<name>/output/` make
 this cheap, unless they were deleted too. The version before the last rebuild is in
-`build/<name>/previous/`.
+`build/<name>/previous/`. If a rebuild can't move the new version into place (e.g. Windows
+Defender holds a file open), `build` puts the previous version back so links never dangle, and
+leaves the new build in `build/<name>/` for inspection.
 
 ## Command reference
 

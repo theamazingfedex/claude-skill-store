@@ -66,7 +66,8 @@ recipe ──► skill-seekers 3.1.3: scrape --config config.json --enhance-leve
              ├─ SKILL.md frontmatter: name + the recipe's quoted description (+ extra frontmatter)
              ├─ references: split files over max_reference_tokens at headings; add a
              │   "## Table of Contents" to each; an oversized file becomes parts + an index
-             └─► validate, then swap into <store>/skills/<name>/ (previous version → build/<name>/previous/)
+             └─► validate, then swap into <store>/skills/<name>/ (previous version → build/<name>/previous/;
+                 if the swap fails, the previous version is put back and the new build is kept)
         ──► validation
              ├─ strict YAML parse of the frontmatter (PyYAML)              ┐ the real gate
              ├─ admission rules (= skill-store check)                      ┘

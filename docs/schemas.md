@@ -91,7 +91,7 @@ exists at session start so Claude Code live-reloads link changes.
 | `built_at` | ISO 8601 \| null | Last successful build |
 | `approved` | bool | The user's explicit approval for linking. New builds start `false` |
 | `approved_at` | ISO 8601 \| null | When it was approved |
-| `last_used` | ISO 8601 \| null | Last Skill tool call seen by the usage hook. Drives LRU pruning |
+| `last_used` | ISO 8601 \| null | Latest Skill tool call, **copied from `usage.jsonl`** whenever a command saves `store.json` (the usage hook itself never writes `store.json`). Can lag behind the log; LRU reads the log first and uses this only as a fallback |
 
 ## Usage log: `<store>/usage.jsonl`
 
