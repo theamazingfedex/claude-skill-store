@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/theamazingfedex/claude-skill-store/schemas/usage-record.schema.json",
+  "title": "One line of <store>/usage.jsonl",
+  "type": "object",
+  "required": ["skill", "session", "project", "time"],
+  "properties": {
+    "skill": {"type": "string"},
+    "session": {"type": ["string", "null"]},
+    "project": {"type": ["string", "null"]},
+    "time": {"type": "string", "format": "date-time"}
+  }
+}

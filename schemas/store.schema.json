@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/theamazingfedex/claude-skill-store/schemas/store.schema.json",
+  "title": "skill-store registry (<store>/store.json)",
+  "type": "object",
+  "required": ["version", "skills"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"const": 1},
+    "skills": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$", "maxLength": 64},
+      "additionalProperties": {"$ref": "#/$defs/entry"}
+    }
+  },
+  "$defs": {
+    "datetime": {"type": ["string", "null"], "format": "date-time"},
+    "entry": {
+      "type": "object",
+      "required": ["source", "version", "pinned_url", "built_at", "approved", "approved_at", "last_used"],
+      "properties": {
+        "source": {"type": "string", "description": "Where the skill came from: a docs URL, a repo, or 'manual' for hand-written skills."},
+        "version": {"type": ["string", "null"], "description": "Version of the documented software, e.g. '4.7'."},
+        "pinned_url": {"type": ["string", "null"], "description": "Versioned URL scraped (e.g. /en/4.7/, not /en/stable/)."},
+        "built_at": {"$ref": "#/$defs/datetime"},
+        "approved": {"type": "boolean", "description": "The user's explicit approval for linking. Re-linking an approved skill is automatic."},
+        "approved_at": {"$ref": "#/$defs/datetime"},
+        "last_used": {"$ref": "#/$defs/datetime", "description": "Latest Skill tool call, from the usage hook."}
+      }
+    }
+  }
+}
