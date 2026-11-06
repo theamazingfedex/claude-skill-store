@@ -1,5 +1,10 @@
 # Linking skills in AO worktrees (and other fresh checkouts)
 
+> **AO** ([Agent Orchestrator](https://github.com/OrchestratorInc/agent-orchestrator)) is an
+> optional, separate tool that runs and supervises many coding agents, each in its own git worktree.
+> The skill store works without it. Section 1 only applies if you use AO. Section 2 applies to any
+> checkout.
+
 Links are never committed (`.claude/skills/.gitignore` ignores everything but itself), so every
 new checkout or worktree starts **without** them. Something has to run `skill-store sync` there.
 

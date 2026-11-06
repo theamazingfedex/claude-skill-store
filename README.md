@@ -313,7 +313,7 @@ success, because SessionStart output is added to Claude's context. The snippets 
 existing `hooks` object instead of replacing it. Check the result with `/hooks` inside Claude Code.
 
 **Recommended setup: user-level, via the wrapper scripts.** These live in `~/.claude/settings.json`,
-so they cover every project and every session, including automated ones in AO worktrees. The wrappers in [`hooks/`](hooks/) find
+so they cover every project and every session, including automated ones in [AO](#ao-worktrees) worktrees. The wrappers in [`hooks/`](hooks/) find
 `skill-store` even if it isn't on the hook's PATH (`SKILL_STORE_CMD`, then PATH, then
 `python -m skillstore`) and always exit 0. In a project without a manifest, `sync` is a no-op that
 creates nothing, so a user-level SessionStart hook is harmless in unrelated projects.
@@ -370,6 +370,13 @@ trust it, neither the SessionStart sync nor the usage hook runs. Claude Code rec
 `~/.claude/settings.json` don't depend on this.
 
 ### AO worktrees
+
+**AO** ([Agent Orchestrator](https://github.com/OrchestratorInc/agent-orchestrator)) is a separate
+tool for planning, running and supervising many coding agents (Claude Code, Codex and others) at
+once. It gives each agent session its own git worktree. **You don't need AO to use the skill
+store.** This section matters only if you use AO, or anything else that creates checkouts or
+worktrees for you. For AO it shows which project settings run `skill-store` at the right moments.
+Without AO, the launch wrapper below does the same job.
 
 New worktrees start without links. **Always run `skill-store sync` before launching `claude` in a
 fresh checkout or worktree.** Use an AO `--post-create "skill-store sync"` step, or a small launch
