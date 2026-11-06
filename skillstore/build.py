@@ -1,6 +1,6 @@
 """Build a skill into the store with skill-seekers 3.1.3, then post-process it.
 
-Workarounds for skill-seekers 3.1.3 (see the research for issue #15):
+Workarounds for skill-seekers 3.1.3 (see docs/build-recipe.md):
 
 - the config route ignores ``--output``: we control the cwd (``build/<name>/``) and read
   ``output/<name>/`` from there;

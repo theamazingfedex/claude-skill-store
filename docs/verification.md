@@ -12,10 +12,10 @@ This checklist confirms that Claude Code really picks up skills linked from the 
 
 ## Last verified
 
-Windows 10 Pro 19045, run by an independent agent on 2026-11-06:
-- Claude Code **2.1.318**, one live `claude -p --input-format stream-json` process for the mid-session
-  steps (no restart, no `--resume`);
-- step 6 re-tested in the **interactive TUI** (Claude Code **2.1.319**, driven through a ConPTY).
+| Date | OS | Claude Code | Mode |
+|---|---|---|---|
+| 2026-11-06 | Windows 10 Pro 19045 | 2.1.318 | `claude -p`, one continuous session for the mid-session steps |
+| 2026-11-06 | Windows 10 Pro 19045 | 2.1.319 | interactive TUI (step 6) |
 
 | # | Step | Result |
 |---|---|---|
@@ -30,15 +30,16 @@ Windows 10 Pro 19045, run by an independent agent on 2026-11-06:
 
 `/reload-skills` and restarts were never needed for steps 1–5. Links created *after* startup (step 2)
 are picked up in the interactive TUI too. Only links created by the `SessionStart` hook *during*
-startup are missed. If you run this on another OS or Claude Code version, add a row set here.
+startup are missed.
 
 What this means in practice:
 
 - Mid-session `link`, `unlink` and edits just work. After an `unlink`, start a new session if you
   want the model's own picture of its skills to be accurate. The skill can no longer be invoked, but
   the model isn't told it's gone.
-- For fresh worktrees and AO workers, **create the links before Claude Code starts**: an AO
-  `--post-create "skill-store sync"` step, or `skill-store sync` in whatever launches Claude Code.
+- For fresh checkouts and worktrees, **create the links before Claude Code starts**: run
+  `skill-store sync` from a worktree-creation hook (e.g. an AO `--post-create` step) or from whatever
+  launches Claude Code.
   This is the only path that works on the first prompt.
 - The `SessionStart` hook alone is **not enough** for a fresh checkout. It creates the links, but the
   running session doesn't pick them up. Run `/reload-skills` once (interactive), or start a new
@@ -235,8 +236,3 @@ find "$V" -path "$V/venv" -prune -o -type l -print   # must print nothing (the v
 rm -r "$V"                 # only if the line above printed nothing
 ```
 
-## Report the results
-
-Record ✅/❌ per step, with your Claude Code version, your OS, and whether the project was on the
-same volume as the store or a different one. Add them to the results table above (by PR), or post
-them on issue #15/#16 in `claude-blender-generations`.

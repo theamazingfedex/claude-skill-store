@@ -27,7 +27,7 @@ A recipe is a JSON file ([schema](../schemas/recipe.schema.json); examples in
 {
   "recipe_version": 1,
   "name": "godot47-asset-pipeline",
-  "description": "Use when exporting Blender assets for Godot 4.7 or debugging Godot glTF/.glb import: import hints and name suffixes (-col, -noimp), ...",
+  "description": "Use when importing glTF/.glb assets into Godot 4.7 or debugging their import: import hints and name suffixes (-col, -noimp), ...",
   "source": "https://docs.godotengine.org/en/4.7/tutorials/assets_pipeline/",
   "version": "4.7",
   "pinned_url": "https://docs.godotengine.org/en/4.7/tutorials/assets_pipeline/index.html",
@@ -111,7 +111,7 @@ signal only. The strict PyYAML parse plus the admission rules decide.
 
 ## skill-seekers 3.1.3 pitfalls and their workarounds
 
-These come from hands-on builds (research #15).
+These come from hands-on builds with skill-seekers 3.1.3.
 
 | # | Pitfall | What `build` does about it |
 |---|---|---|

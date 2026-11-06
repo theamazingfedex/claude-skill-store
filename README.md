@@ -244,8 +244,7 @@ until it passes.
 - `sync` reports unapproved manifest entries and doesn't link them;
 - re-linking a skill that was approved before (e.g. after it was pruned) is automatic.
 
-Agents and automation may build skills freely, but should ask you (e.g. through the orchestrator)
-before anything new is approved.
+Agents and automation may build skills freely, but should ask you before anything new is approved.
 
 ## Link, unlink, sync, status
 
@@ -314,7 +313,7 @@ success, because SessionStart output is added to Claude's context. The snippets 
 existing `hooks` object instead of replacing it. Check the result with `/hooks` inside Claude Code.
 
 **Recommended setup: user-level, via the wrapper scripts.** These live in `~/.claude/settings.json`,
-so they cover every project and every AO worker. The wrappers in [`hooks/`](hooks/) find
+so they cover every project and every session, including automated ones in [AO](#ao-worktrees) worktrees. The wrappers in [`hooks/`](hooks/) find
 `skill-store` even if it isn't on the hook's PATH (`SKILL_STORE_CMD`, then PATH, then
 `python -m skillstore`) and always exit 0. In a project without a manifest, `sync` is a no-op that
 creates nothing, so a user-level SessionStart hook is harmless in unrelated projects.
@@ -372,6 +371,13 @@ trust it, neither the SessionStart sync nor the usage hook runs. Claude Code rec
 
 ### AO worktrees
 
+**AO** ([Agent Orchestrator](https://github.com/OrchestratorInc/agent-orchestrator)) is a separate
+tool for planning, running and supervising many coding agents (Claude Code, Codex and others) at
+once. It gives each agent session its own git worktree. **You don't need AO to use the skill
+store.** This section matters only if you use AO, or anything else that creates checkouts or
+worktrees for you. For AO it shows which project settings run `skill-store` at the right moments.
+Without AO, the launch wrapper below does the same job.
+
 New worktrees start without links. **Always run `skill-store sync` before launching `claude` in a
 fresh checkout or worktree.** Use an AO `--post-create "skill-store sync"` step, or a small launch
 wrapper. Links created that way are seen on the first prompt:
@@ -416,8 +422,8 @@ directory. See
   files** and leaves the link behind (verified). Without the slash it removes only the link, but
   don't rely on remembering that.
 - **Never use the vercel `skills` CLI `remove`** (`npx skills remove …`). It has no unlink, and
-  `remove` deletes the canonical copy too. Leave links it created (e.g.
-  `~/.claude/skills/{find-skills,wayfinder}` → `~/.agents/skills/`) alone; this tool never touches them.
+  `remove` deletes the canonical copy too. Leave links it created (`~/.claude/skills/<name>` →
+  `~/.agents/skills/<name>`) alone; this tool never touches them.
 - Before deleting a checkout or worktree that has links, run `skill-store unlink --all` there
   first. It removes every store link non-recursively and leaves the manifest unchanged.
 
@@ -453,7 +459,7 @@ skill-store unlink verify-alpha  # can it still be invoked? is the store copy st
 # edit the store copy of verify-alpha's SKILL.md: is the change picked up?
 ```
 
-Add your results (✅/❌ per step, Claude Code version, OS) to the table in docs/verification.md.
+Record ✅/❌ per step, along with your Claude Code version and OS.
 
 ## Troubleshooting
 
