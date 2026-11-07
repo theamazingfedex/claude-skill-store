@@ -18,6 +18,8 @@ $ErrorActionPreference = 'Continue'
 $sub = if ($args.Count -gt 0) { [string]$args[0] } else { '' }
 
 try {
+    # Only a project sync needs the manifest check. `sync --global` is detected here; a leading
+    # `--global sync` makes $sub '--global', so it skips the check too.
     if ($sub -eq 'sync' -and -not ($args -contains '--global')) {
         $proj = if ($env:CLAUDE_PROJECT_DIR) { $env:CLAUDE_PROJECT_DIR } else { (Get-Location).Path }
         if (-not (Test-Path -LiteralPath (Join-Path $proj '.claude\skills.manifest.json'))) { exit 0 }

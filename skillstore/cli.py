@@ -319,10 +319,16 @@ def _subcommand(argv: list[str]) -> str | None:
     return None
 
 
+def _is_hook_output_flag(tok: str) -> bool:
+    """``--hook-output`` or an abbreviation argparse accepts for it (``--ho`` and longer; ``--h``
+    is ambiguous with ``--help``)."""
+    return len(tok) >= 4 and "--hook-output".startswith(tok)
+
+
 def _never_fails(argv: list[str]) -> bool:
     """Hook entry points that must exit 0 even on bad arguments."""
     sub = _subcommand(argv)
-    return sub == "log-usage" or (sub == "sync" and "--hook-output" in argv)
+    return sub == "log-usage" or (sub == "sync" and any(_is_hook_output_flag(t) for t in argv))
 
 
 def run(argv: list[str]) -> int:

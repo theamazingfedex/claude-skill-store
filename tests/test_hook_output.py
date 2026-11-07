@@ -160,10 +160,20 @@ def test_many_names_are_truncated(env):
     ["sync", "--quiet", "--hook-output", "--bogus"],
     ["--global", "--project", ".", "sync", "--quiet", "--hook-output"],
     ["--store", "x", "sync", "--hook-output", "--cap", "3"],
+    ["sync", "--hook", "--bogus"],  # argparse abbreviation of --hook-output
+    ["sync", "--ho", "--bogus"],
 ])
 def test_bad_arguments_still_exit_0(env, argv):
     rc, out, _ = env.run_raw(*argv)
     assert (rc, out) == (0, "")
+
+
+def test_abbreviated_flag_emits_message(env):
+    env.add_skill("alpha")
+    env.write_manifest(["alpha"])
+    rc, out, _ = env.run("sync", "--hook")
+    assert rc == 0
+    _assert_reload_message(_hook_json(out), ["alpha"])
 
 
 def test_errors_exit_0_and_print_no_json(env):

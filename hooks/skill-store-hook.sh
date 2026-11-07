@@ -20,6 +20,8 @@
 
 sub="${1:-}"
 
+# Only a project sync needs the manifest check. `sync --global` is detected here; a leading
+# `--global sync` makes $sub "--global", so it skips the check too.
 if [ "$sub" = "sync" ]; then
     is_global=0
     for a in "$@"; do [ "$a" = "--global" ] && is_global=1; done
