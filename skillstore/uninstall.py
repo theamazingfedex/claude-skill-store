@@ -627,9 +627,15 @@ def _restore_action(st: State, s: Skill) -> Action:
         if os.path.lexists(tmp):
             raise RuntimeError(f"{tmp} already exists; remove it and run again")
         shutil.copytree(s.entry, tmp, symlinks=True)
-        if os.path.lexists(dest):
+        had_link = os.path.lexists(dest)
+        if had_link:
             remove_link(dest)
-        os.rename(tmp, dest)
+        try:
+            os.rename(tmp, dest)
+        except OSError:
+            if had_link and not os.path.lexists(dest):
+                create_link(dest, s.entry)  # put the global store link back
+            raise
         return f"{s.name}: copied into {dest} (a standalone directory)"
 
     how = f"link {dest} -> {s.external}" if s.external else f"copy the store copy to {dest}"
@@ -1024,13 +1030,22 @@ def format_report(st: State, rep: Report) -> str:
 
 
 def execute(acts: list[Action], rep: Report) -> None:
+    failed_restores: list[str] = []
     for a in acts:
+        if a.group == GROUPS[6] and failed_restores:
+            # The store may hold the only copy of a skill whose restore failed: keep it.
+            rep.errors.append(f"{a.text}: not done, because restoring {', '.join(failed_restores)} "
+                              "failed and the store still holds the only copy. Fix the error above "
+                              "and run the uninstall again")
+            continue
         try:
             msg = a.fn()
         except Skip as exc:
             rep.skipped.append(str(exc))
         except Exception as exc:  # noqa: BLE001 - report and continue
             rep.errors.append(f"{a.text}: {exc}")
+            if a.kind == "restored":
+                failed_restores.append(a.text.split(":", 1)[0])
         else:
             (rep.restored if a.kind == "restored" else rep.removed).append(msg)
 

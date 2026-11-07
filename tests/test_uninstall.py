@@ -266,6 +266,41 @@ def test_restore_copies_store_skills_and_relinks_checkouts(env, tmp_path, fakes,
     assert "Restored (2)" in out
 
 
+def test_failed_restore_keeps_the_store(env, monkeypatch, capsys):
+    env.add_skill("alpha")
+    env.add_skill("beta")
+    glink(env, "alpha")
+    real_copytree = uninstall.shutil.copytree
+
+    def copytree(src, dst, *args, **kw):
+        if Path(src).name == "beta":
+            raise PermissionError("denied")
+        return real_copytree(src, dst, *args, **kw)
+
+    monkeypatch.setattr(uninstall.shutil, "copytree", copytree)
+    assert run("--yes", "--restore") == 1
+    assert (env.store_root / "skills" / "beta" / "SKILL.md").is_file()  # the only copy survives
+    assert (env.store_root / "store.json").is_file()
+    alpha = env.global_dir / "alpha"
+    assert alpha.is_dir() and not links.is_link(alpha)  # the other restore still happened
+    out = capsys.readouterr().out
+    assert "restoring beta failed" in out and "denied" in out
+
+
+def test_failed_rename_puts_the_global_link_back(env, monkeypatch):
+    env.add_skill("alpha")
+    glink(env, "alpha")
+
+    def rename(a, b):
+        raise OSError("busy")
+
+    monkeypatch.setattr(uninstall.os, "rename", rename)
+    assert run("--yes", "--restore") == 1
+    assert (env.store_root / "skills" / "alpha" / "SKILL.md").is_file()
+    assert links.is_link(env.global_dir / "alpha")  # link restored, not lost
+    assert (env.global_dir / "alpha" / "SKILL.md").is_file()
+
+
 def test_yes_without_restore_defaults_to_no(env, fakes, capsys):
     env.add_skill("alpha")
     glink(env, "alpha")
