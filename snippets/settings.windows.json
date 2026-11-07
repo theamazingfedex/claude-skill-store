@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "powershell.exe",
-            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:/Users/YOU/src/claude-skill-store/hooks/skill-store-hook.ps1", "sync", "--quiet"],
+            "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:/Users/YOU/src/claude-skill-store/hooks/skill-store-hook.ps1", "sync", "--quiet", "--hook-output"],
             "timeout": 60
           }
         ]

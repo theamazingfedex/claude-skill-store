@@ -27,5 +27,6 @@ Linux/macOS) into the shared user-level skills store (`~/.skill-store/skills/`).
   (removes every store link there, non-recursively, and leaves the manifest unchanged).
 - If a skill listed in `.claude/skills.manifest.json` is missing in this session (e.g. a fresh
   worktree where the SessionStart hook created the links during startup), run `skill-store sync`,
-  then ask the user to run `/reload-skills` once. Claude Code doesn't pick up links created while
-  the session was starting.
+  then ask the user to run `/reload-skills` once. Claude Code may not pick up links created while
+  the session was starting (a `skill-store linked … after the session's first skill scan` note at
+  session start means the hook created some).

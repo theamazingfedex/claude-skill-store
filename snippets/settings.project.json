@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "skill-store sync --quiet",
+            "command": "skill-store sync --quiet --hook-output",
             "timeout": 60
           }
         ]

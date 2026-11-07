@@ -7,7 +7,8 @@ This checklist confirms that Claude Code really picks up skills linked from the 
 3. a link **removed mid-session** stops working without a restart;
 4. **edits inside the link target** (the store copy) are picked up;
 5. on Windows, a **cross-volume** junction (store on `C:`, project on `E:`) behaves the same;
-6. a fresh worktree gets its links from the `SessionStart` hook;
+6. a fresh worktree gets its links from the `SessionStart` hook, and `--hook-output` makes them
+   usable in that same session (or tells the user to run `/reload-skills`);
 7. listing cost is visible in `/skill-doctor`.
 
 ## Last verified
@@ -18,6 +19,8 @@ This checklist confirms that Claude Code really picks up skills linked from the 
 | 2026-11-06 | Windows 10 Pro 19045 | 2.1.319 | interactive TUI (step 6) |
 | 2026-11-06 | Kali Linux 2026.2 on WSL2 (kernel 6.18.40.1) | 2.1.318 | `claude -p`, one continuous session for the mid-session steps; `-p` step 6 |
 | 2026-11-06 | Kali Linux 2026.2 on WSL2 (kernel 6.18.40.1) | 2.1.318 / 2.1.319 | interactive TUI (step 6: SessionStart case on 2.1.318, sync-before-launch control on 2.1.319); step 7 on 2.1.319 |
+| 2026-11-06 | Windows 10 Pro 19045 | 2.1.319 | `claude -p`, step 6 with `sync --quiet --hook-output`, plus a plain `sync --quiet` control |
+| 2026-11-06 | Kali Linux 2026.2 on WSL2 (kernel 6.18.40.1) | 2.1.319 | `claude -p` and interactive TUI (in tmux), step 6 with `sync --quiet --hook-output` via `hooks/skill-store-hook.sh`, plus a plain `sync --quiet` `-p` control |
 
 | # | Step | Windows 10 (junctions) | Linux, WSL2 Kali (symlinks) |
 |---|---|---|---|
@@ -26,14 +29,15 @@ This checklist confirms that Claude Code really picks up skills linked from the 
 | 3 | Link removed mid-session | ✅ gone from the registry; invoking it gives `Unknown skill`. ⚠️ **the model is not told**, so if asked it still claims the skill is available | ✅ same: `Unknown skill`, store copy kept. ⚠️ no removal delta for the model |
 | 4 | Edit inside the store copy | ✅ re-invoking it loads the new body | ✅ |
 | 5 | Cross-volume | ✅ store `C:`, project `E:` | n/a. Analogue: project on drvfs (`/mnt/c`), store on ext4 ✅ (Windows sees that symlink as a junction) |
-| 6 | Fresh worktree via `SessionStart` sync | ❌ interactive (2.1.319): not picked up at all (still missing on turn 2, ~26 s in) until `/reload-skills` or a new session. ⚠️ `-p` (2.1.318): from turn 2 | ❌ interactive (2.1.318): still missing on turn 2 (~1 min in); ✅ after `/reload-skills`. ⚠️ `-p` (2.1.318): from the first turn that *starts* after Claude Code's file watcher sees the new links (a few seconds after launch; ~4.4 s on Linux), so turn 2 or later (turn 3 in a fast run) |
+| 6 | Fresh worktree via a plain `SessionStart` `sync --quiet` | ❌ interactive (2.1.319): not picked up at all (still missing on turn 2, ~26 s in) until `/reload-skills` or a new session. ⚠️ `-p` (2.1.318): from turn 2 | ❌ interactive (2.1.318): still missing on turn 2 (~1 min in); ✅ after `/reload-skills`. ⚠️ `-p` (2.1.318): from the first turn that *starts* after Claude Code's file watcher sees the new links (a few seconds after launch; ~4.4 s on Linux), so turn 2 or later (turn 3 in a fast run) |
+| 6 | Fresh worktree via `SessionStart` `sync --quiet --hook-output` | ✅ `-p` (2.1.319): turn 1; the hook's `reloadSkills` put both skills in the session's skill list (the plain-hook control on the same version: missing on turn 1). The transcript records the notice as a hook system message. Interactive: not run | ✅ `-p` (2.1.319): turn 1 (control: missing). ✅ interactive (2.1.319): the TUI shows `SessionStart:startup says: skill-store linked 2 skills …`, and the skill works on turn 1 without `/reload-skills` |
 | 6 | Control: `skill-store sync` before launch | ✅ turn 1 | ✅ turn 1, interactive and `-p` |
 | 7 | `/skill-doctor` per-skill cost | ✅ ~40 tokens of listing per test skill. `/doctor`: no listing estimate in `-p` | ✅ ~40 tokens per test skill (2.1.319). In the interactive TUI it now opens Plugins → **Stats**. `/doctor`: an agentic health check, no estimate, in both modes |
 | — | `PostToolUse` `Skill` usage hook | ✅ one `usage.jsonl` line per successful Skill call; none for a failed call | ✅ same, in both `-p` and the TUI |
 
 On both systems, `/reload-skills` and restarts were never needed for steps 1–5. Links created *after* startup (step 2)
-are picked up in the interactive TUI too. Only links created by the `SessionStart` hook *during*
-startup are missed.
+are picked up in the interactive TUI too. Only links created by a plain `sync --quiet`
+`SessionStart` hook *during* startup are missed; with `--hook-output` (2.1.319) they are not.
 
 What this means in practice:
 
@@ -44,10 +48,13 @@ What this means in practice:
   `skill-store sync` from a worktree-creation hook (e.g. an AO `--post-create` step) or from whatever
   launches Claude Code.
   This is the only path that works on the first prompt.
-- The `SessionStart` hook alone is **not enough** for a fresh checkout. It creates the links, but the
-  running session doesn't pick them up. Run `/reload-skills` once (interactive), or start a new
-  session. The links are then there for every later session in that checkout. Keep the hook as a
-  backstop that repairs links for the *next* session (e.g. after a `git pull` changed the manifest).
+- A plain `sync --quiet` `SessionStart` hook is **not enough** for a fresh checkout. It creates the
+  links, but the running session doesn't pick them up until `/reload-skills` or a new session.
+- `sync --quiet --hook-output` fixes that on Claude Code 2.1.319: its `reloadSkills` output makes
+  Claude Code re-scan after the SessionStart hooks, so the links work on the first prompt, and the
+  user sees a notice to run `/reload-skills` once if they're still missing (e.g. on a version
+  without the re-scan). Syncing before launch remains the most robust path: it doesn't depend on
+  the Claude Code version or on folder trust.
 
 ## How to run it
 
@@ -63,8 +70,8 @@ Claude Code can **auto-update in the background** during a run (a fresh install 
 
 The hooks below use the **exec form** with the full path of `skill-store` and an explicit
 `--store`. So they work even when `skill-store` isn't on Claude Code's PATH (e.g. a venv install) and
-`SKILL_STORE_HOME` isn't in its environment. A bare `skill-store sync --quiet` hook fails silently
-in that case.
+`SKILL_STORE_HOME` isn't in its environment. A bare `skill-store sync --quiet --hook-output` hook
+fails silently in that case.
 
 ### 0. Prepare a scratch store and project
 
@@ -95,7 +102,7 @@ ss link verify-alpha; ss status
 $x = $exe -replace '\\','/'; $s = $store -replace '\\','/'
 $settings = @{ hooks = @{
   PostToolUse  = @(@{ matcher = 'Skill'; hooks = @(@{ type='command'; command=$x; args=@('--store',$s,'log-usage'); timeout=10 }) })
-  SessionStart = @(@{ hooks = @(@{ type='command'; command=$x; args=@('--store',$s,'sync','--quiet'); timeout=60 }) })
+  SessionStart = @(@{ hooks = @(@{ type='command'; command=$x; args=@('--store',$s,'sync','--quiet','--hook-output'); timeout=60 }) })
 } }
 [IO.File]::WriteAllText("$proj\.claude\settings.json", ($settings | ConvertTo-Json -Depth 10), $utf8)
 ```
@@ -126,7 +133,7 @@ ss check verify-alpha && ss approve verify-alpha && ss approve verify-beta && ss
 cat > "$proj/.claude/settings.json" <<EOF
 {"hooks": {
   "PostToolUse":  [{"matcher": "Skill", "hooks": [{"type": "command", "command": "$exe", "args": ["--store", "$store", "log-usage"], "timeout": 10}]}],
-  "SessionStart": [{"hooks": [{"type": "command", "command": "$exe", "args": ["--store", "$store", "sync", "--quiet"], "timeout": 60}]}]
+  "SessionStart": [{"hooks": [{"type": "command", "command": "$exe", "args": ["--store", "$store", "sync", "--quiet", "--hook-output"], "timeout": 60}]}]
 }}
 EOF
 ```
@@ -200,13 +207,23 @@ git -C "$proj" -c user.name=verify -c user.email=verify@example.invalid commit -
 git -C "$proj" worktree add ../proj-wt
 ```
 
-`.claude/skills/` in `../proj-wt` now contains only `.gitignore`. Start `claude` there.
+`.claude/skills/` in `../proj-wt` now contains only `.gitignore`. Start `claude` there (the
+committed `.claude/settings.json` carries the `sync --quiet --hook-output` hook).
 
 - [ ] After the session starts, the links exist (the `SessionStart` hook created them).
-- [ ] Ask about zorblax-verify-beta: expected **not** known yet. Interactive: still not on turn 2
-      (2.1.318 on Linux, 2.1.319 on Windows). `-p`: known from the first turn that *starts* after Claude Code's file watcher sees the new links (a few seconds after launch; ~4.4 s on Linux), so turn 2 or later.
-- [ ] Run `/reload-skills`, ask again: now it works.
+- [ ] Interactive: the startup screen shows `SessionStart:startup says: skill-store linked 2 skills
+      into this checkout at startup: verify-alpha, verify-beta. If /skills doesn't list them, run
+      /reload-skills once.` With `claude -p --output-format stream-json --verbose`, the
+      `hook_response` event's `output` is that hook JSON, on one line, with `"reloadSkills": true`.
+- [ ] Ask about zorblax-verify-beta on the **first** turn: expected to work on 2.1.319 (the
+      re-scan). If it doesn't, run `/reload-skills` (the notice says so), ask again: now it works.
+- [ ] Start a second session in `../proj-wt`: no notice this time (nothing was created).
 - [ ] `git -C ../proj-wt status` shows nothing under `.claude/skills/`.
+
+For comparison, with a plain `sync --quiet` hook (no `--hook-output`, so no re-scan) the skills
+were **not** known on turn 1 on 2.1.318/2.1.319. Interactive: still not on turn 2. `-p`: known from the first turn that *starts* after Claude
+Code's file watcher sees the new links (a few seconds after launch; ~4.4 s on Linux), so turn 2 or
+later. `/reload-skills` fixes it.
 
 Control: sync **before** launch, in a second, genuinely fresh worktree. `proj-wt` can't be used for
 this, because it already has its links by now.

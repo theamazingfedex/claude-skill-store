@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/src/claude-skill-store/hooks/skill-store-hook.sh\" sync --quiet",
+            "command": "\"$HOME/src/claude-skill-store/hooks/skill-store-hook.sh\" sync --quiet --hook-output",
             "timeout": 60
           }
         ]
