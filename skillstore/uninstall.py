@@ -731,12 +731,17 @@ def _package_actions() -> list[Action]:
     tmp = Path(tempfile.gettempdir())
     venv = tmp / "skill-store-test-venv"
     if venv.is_dir() and not _is_reparse_or_link(venv) and (venv / "pyvenv.cfg").is_file():
-        acts.append(Action(GROUPS[3], f"delete the test venv {venv} (made by scripts/test-local.*)",
-                           lambda: (delete_tree(venv), f"test venv {venv}")[1]))
+        def rm_venv():
+            if not (venv / "pyvenv.cfg").is_file() or _is_reparse_or_link(venv):
+                raise Skip(f"{venv}: no longer a venv; left alone")
+            delete_tree_unlinking(venv)  # venvs hold symlinks (bin/python, lib64 on Linux)
+            return f"test venv {venv}"
+        acts.append(Action(GROUPS[3], f"delete the test venv {venv} (made by scripts/test-local.*; "
+                           "its symlinks are removed first, one by one)", rm_venv))
     for src in sorted(tmp.glob("skill-store-src.*")):
         if src.is_dir() and not _is_reparse_or_link(src) and (src / "pyproject.toml").is_file():
             acts.append(Action(GROUPS[3], f"delete the leftover test copy {src}",
-                               lambda src=src: (delete_tree(src), f"test copy {src}")[1]))
+                               lambda src=src: (delete_tree_unlinking(src), f"test copy {src}")[1]))
     getpip = tmp / "skill-store-get-pip.py"
     if getpip.is_file() and not is_link(getpip):
         acts.append(Action(GROUPS[3], f"delete {getpip}", lambda: (os.unlink(getpip), str(getpip))[1]))
@@ -885,6 +890,24 @@ def delete_tree(root: Path) -> None:
     rm(root)
 
 
+def delete_tree_unlinking(root: Path) -> list[str]:
+    """Remove every link inside ``root`` one by one and non-recursively (their targets are
+    kept), check that none is left, then ``delete_tree``. Returns a note per removed link."""
+    root = Path(root)
+    if _is_reparse_or_link(root):
+        raise RuntimeError(f"refusing to delete {root}: it is a link")
+    notes = []
+    for lp in find_links(root):
+        tgt = link_target(lp)
+        remove_link(lp)  # refuses anything that is not a symlink/junction
+        notes.append(f"link {lp}" + (f" (its target {tgt} is kept)" if tgt else ""))
+    left = find_links(root)
+    if left:
+        raise RuntimeError(f"{root} not deleted: links remain inside it: " + ", ".join(map(str, left)))
+    delete_tree(root)
+    return notes
+
+
 def _store_refusal(st: State) -> str | None:
     s = st.store
     if not os.path.lexists(s):
@@ -911,15 +934,7 @@ def _store_action(st: State) -> Action:
             raise RuntimeError(f"store not deleted: {why}")
         if not os.path.lexists(st.store):
             raise Skip(f"{st.store}: already gone")
-        notes = []
-        for lp in find_links(st.store):
-            tgt = link_target(lp)
-            remove_link(lp)  # non-recursive; refuses anything that is not a symlink/junction
-            notes.append(f"link {lp}" + (f" (its target {tgt} is kept)" if tgt else ""))
-        left = find_links(st.store)
-        if left:
-            raise RuntimeError("store not deleted: links remain inside it: " + ", ".join(map(str, left)))
-        delete_tree(st.store)
+        notes = delete_tree_unlinking(st.store)
         return "; ".join(notes + [f"store directory {st.store}"])
     n = len(st.store_internal_links)
     text = f"delete {st.store}"

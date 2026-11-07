@@ -515,6 +515,33 @@ def test_package_installs_and_test_venvs_removed(env, fakes, capsys):
     assert not venv.exists() and not src.exists() and unrelated.is_dir()
 
 
+def test_real_shaped_venv_with_symlinks_is_deleted(env, fakes, tmp_path):
+    """Linux venvs contain symlinks (bin/python -> python3, lib64 -> lib): remove them first."""
+    env.add_skill("alpha")
+    venv = fakes.systemp / "skill-store-test-venv"
+    (venv / "lib" / "site").mkdir(parents=True)
+    (venv / "lib" / "site" / "mod.py").write_text("x")
+    (venv / "bin").mkdir()
+    (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    links.create_link(venv / "lib64", venv / "lib")  # symlink on Linux, junction on Windows
+    base_python = tmp_path / "usr" / "bin"
+    base_python.mkdir(parents=True)
+    (base_python / "python3").write_text("real interpreter")
+    links.create_link(venv / "bin" / "base", base_python)  # a dir link pointing outside the venv
+    file_link = venv / "bin" / "python"
+    try:
+        os.symlink(str(base_python / "python3"), str(file_link))
+    except (OSError, NotImplementedError):
+        if not links.IS_WINDOWS:
+            raise
+        file_link = None  # no symlink privilege on this Windows account: dir links still covered
+    if file_link is None and not uninstall.find_links(venv):
+        pytest.skip("links are not supported here")
+    assert run("--yes") == 0
+    assert not os.path.lexists(venv)
+    assert (base_python / "python3").read_text() == "real interpreter"  # link target kept
+
+
 def test_temp_dir_without_pyvenv_cfg_is_left(env, fakes):
     env.add_skill("alpha")
     d = fakes.systemp / "skill-store-test-venv"
