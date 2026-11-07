@@ -1,4 +1,4 @@
-"""The per-project manifest: ``<project>/.claude/skills.manifest.json``."""
+"""Manifests: per project (``<project>/.claude/skills.manifest.json``) or global (``<store>/global.manifest.json``)."""
 
 from __future__ import annotations
 
@@ -74,6 +74,17 @@ def ensure_project_dirs(project: ProjectPaths) -> list[str]:
         atomic_write_text(project.gitignore, GITIGNORE_TEXT)
         created.append(str(project.gitignore))
     return created
+
+
+def ensure_target_dirs(target) -> list[str]:
+    """Project scope: ``ensure_project_dirs``. Global scope: only the skills dir (never a
+    ``.gitignore``: the user-level skills dir is not in a repo)."""
+    if not target.is_global:
+        return ensure_project_dirs(target)
+    if target.skills.is_dir():
+        return []
+    target.skills.mkdir(parents=True, exist_ok=True)
+    return [str(target.skills)]
 
 
 def gitignore_ok(project: ProjectPaths) -> bool:

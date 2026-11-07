@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from skillstore import __version__, ops
-from skillstore.paths import SkillStoreError, resolve_project, resolve_store
+from skillstore.paths import SkillStoreError, legacy_home_manifest, resolve_project, resolve_store
 
 
 def _common() -> argparse.ArgumentParser:
@@ -17,6 +17,9 @@ def _common() -> argparse.ArgumentParser:
                    help="store root (default: $SKILL_STORE_HOME or ~/.skill-store)")
     p.add_argument("--project", default=argparse.SUPPRESS,
                    help="project root (default: $CLAUDE_PROJECT_DIR, git toplevel, or cwd)")
+    p.add_argument("--global", dest="global_scope", action="store_true", default=argparse.SUPPRESS,
+                   help="use the global scope: link into $CLAUDE_CONFIG_DIR/skills or "
+                        "~/.claude/skills (manifest: <store>/global.manifest.json)")
     p.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                    help="print the result as JSON")
     return p
@@ -27,7 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="skill-store", parents=[common],
         description="Keep Claude Code skills in a user-level store and link an approved, "
-                    "capped set into each project. Unlinking never deletes.")
+                    "capped set into each project (or, with --global, into ~/.claude/skills). "
+                    "Unlinking never deletes.")
     parser.add_argument("--version", action="version", version=f"skill-store {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
@@ -54,7 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("target")
     p = add("approve", "record the user's explicit approval to link a skill")
     p.add_argument("name")
-    p = add("link", "link an approved skill into the project (adds it to the manifest, enforces the cap)")
+    p = add("link", "link an approved skill into the project, or with --global into the user-level "
+                    "skills dir (adds it to the manifest, enforces the cap)")
     p.add_argument("name")
     p = add("unlink", "remove a skill's link (never its store copy) and drop it from the manifest; "
                       "--all removes every store link and leaves the manifest alone")
@@ -63,16 +68,61 @@ def build_parser() -> argparse.ArgumentParser:
                    help="remove every link into the store (for AO --pre-remove); manifest unchanged")
     p = add("sync", "make the project's links match its manifest (idempotent; for SessionStart)")
     p.add_argument("--quiet", action="store_true", help="no output on success; always exit 0")
-    add("status", "show store skills, approval, links in this project, last use and cap")
+    add("status", "show store skills, approval, links in this project (or --global), global links, "
+                  "last use and cap")
+    add("migrate-global", "move the old '--project ~' setup to the global scope (links only; "
+                          "prints the cleanup commands, deletes no files)")
     p = add("prune", "unlink least recently used skills down to the cap (on demand only)")
     p.add_argument("--cap", type=int, help="target cap (default: the manifest cap)")
     add("log-usage", "PostToolUse hook entry point: log a Skill tool call (always exits 0)")
     return parser
 
 
+_GLOBAL_COMMANDS = {"link", "unlink", "sync", "status", "prune", "migrate-global",
+                    "init", "approve", "check"}  # the last three are store-wide: --global is a no-op
+
+
+def _is_global(args) -> bool:
+    return bool(getattr(args, "global_scope", False)) or args.command == "migrate-global"
+
+
 def _ctx(args) -> ops.Ctx:
-    return ops.Ctx(resolve_store(getattr(args, "store", None)),
-                   resolve_project(getattr(args, "project", None)))
+    store = resolve_store(getattr(args, "store", None))
+    if _is_global(args):
+        return ops.Ctx(store, None, global_scope=True)
+    return ops.Ctx(store, resolve_project(getattr(args, "project", None)))
+
+
+def _check_scope_args(parser, args) -> None:
+    if not _is_global(args):
+        return
+    if getattr(args, "project", None) is not None:
+        parser.error("--global and --project are mutually exclusive"
+                     + (" (migrate-global always uses the global scope)"
+                        if args.command == "migrate-global" else ""))
+    if args.command not in _GLOBAL_COMMANDS:
+        parser.error(f"--global does not apply to '{args.command}'")
+
+
+def _fmt_legacy(lg: dict | None) -> list[str]:
+    if not lg:
+        return []
+    lines = [f"old setup found: {lg['manifest']} (written by '--project ~')"]
+    if lg.get("error"):
+        return lines + [f"  it can't be read: {lg['error']}",
+                        "  fix it, then run: skill-store migrate-global. Until then, global sync and "
+                        "prune leave every unlisted store link alone"]
+    if lg["pending"]:
+        lines.append(f"  not yet in the global scope: {', '.join(lg['pending'])}")
+        lines.append(f"  move to the global scope ({lg['shell']}):")
+    else:
+        lines.append(f"  its skills are all in the global scope; remove the old files ({lg['shell']}):")
+    lines += [f"    {c}" for c in lg["commands"]]
+    return lines
+
+
+def _where_text(r: dict) -> str:
+    return f"global scope ({r['skills_dir']})" if r.get("scope") == "global" else r["project"]
 
 
 def _print(obj, as_json: bool, text: str) -> None:
@@ -84,7 +134,7 @@ def _print(obj, as_json: bool, text: str) -> None:
 
 def _fmt_sync(r: dict) -> str:
     if r.get("skipped"):
-        return f"sync: nothing to do ({r['skipped']})"
+        return "\n".join([f"sync: nothing to do ({r['skipped']})", *_fmt_legacy(r.get("legacy"))])
     lines = []
     r = dict(r)
     # over_cap lists every listed skill beyond the cap; show each once, by what happened to it.
@@ -97,7 +147,8 @@ def _fmt_sync(r: dict) -> str:
                        ("already", "already linked"), ("over_cap_not_linked", "over cap, not linked"),
                        ("needs_approval", "needs approval (skill-store approve <name>)"),
                        ("missing", "not in store (build it)"), ("conflicts",
-                       "name taken by a non-store entry, left alone")):
+                       "name taken by a non-store entry, left alone"),
+                       ("legacy_kept", "left alone (listed in the old '--project ~' manifest)")):
         if r.get(key):
             lines.append(f"{label}: {', '.join(r[key])}")
     for n, errs in r.get("failed_check", {}).items():
@@ -106,28 +157,44 @@ def _fmt_sync(r: dict) -> str:
         lines.append(f"warning: {w}")
     for e in r.get("errors", []):
         lines.append(f"error: {e}")
-    lines.append(f"{r.get('linked_count', 0)}/{r.get('cap')} store skills linked in {r['project']}")
+    lines.append(f"{r.get('linked_count', 0)}/{r.get('cap')} store skills linked in {_where_text(r)}")
+    lines += _fmt_legacy(r.get("legacy"))
     return "\n".join(lines)
 
 
 def _fmt_status(r: dict) -> str:
-    lines = [f"store:   {r['store']}", f"project: {r['project']}",
-             f"manifest: {r['manifest'] or '(none: skill-store init-project)'}"]
+    is_global = r.get("scope") == "global"
+    g = r["global"]
+    if is_global:
+        lines = [f"store:   {r['store']}", f"scope:   global ({r['skills_dir']})",
+                 f"manifest: {r['manifest'] or '(none yet: created by skill-store --global link <name>)'}"]
+    else:
+        lines = [f"store:   {r['store']}", f"project: {r['project']}",
+                 f"manifest: {r['manifest'] or '(none: skill-store init-project)'}"]
     if r["cap"] is not None:
         lines.append(f"linked:  {r['linked_count']}/{r['cap']}")
+    if not is_global:
+        cap = f"/{g['cap']}" if g["cap"] is not None else ""
+        lines.append(f"global:  {len(g['linked'])}{cap} linked in {g['skills_dir']}")
     if not r["skills"]:
         lines.append("(store is empty)")
     else:
-        lines.append(f"{'skill':32} {'approved':8} {'manifest':8} {'linked':6} {'check':5} last used")
+        hdr = f"{'skill':32} {'approved':8} {'manifest':8} {'linked':6} "
+        hdr += "" if is_global else f"{'global':6} "
+        lines.append(hdr + f"{'check':5} last used")
         for s in r["skills"]:
             chk = "-" if s["admission_ok"] is None else ("ok" if s["admission_ok"] else "FAIL")
-            lines.append(f"{s['skill']:32} {('yes' if s['approved'] else 'no'):8} "
-                         f"{('yes' if s['in_manifest'] else 'no'):8} {('yes' if s['linked'] else 'no'):6} "
-                         f"{chk:5} {s['last_used'] or 'never'}")
+            row = (f"{s['skill']:32} {('yes' if s['approved'] else 'no'):8} "
+                   f"{('yes' if s['in_manifest'] else 'no'):8} {('yes' if s['linked'] else 'no'):6} ")
+            if not is_global:
+                row += f"{('yes' if s['linked_globally'] else 'no'):6} "
+            lines.append(row + f"{chk:5} {s['last_used'] or 'never'}")
+    where = r["skills_dir"] if is_global else ".claude/skills"
     for o in r["unmanaged_entries"]:
-        lines.append(f"unmanaged in .claude/skills (left alone): {o['name']} ({o['kind']})")
+        lines.append(f"unmanaged in {where} (left alone): {o['name']} ({o['kind']})")
     for n in r["missing_from_store"]:
         lines.append(f"listed but not in store: {n}")
+    lines += _fmt_legacy(r.get("legacy"))
     return "\n".join(lines)
 
 
@@ -215,6 +282,7 @@ def run(argv: list[str]) -> int:
         args = parser.parse_args(argv)
     if args.command == "log-usage":
         return _log_usage_main(args)
+    _check_scope_args(parser, args)
     as_json = bool(getattr(args, "json", False))
     cmd = args.command
     if cmd == "sync":
@@ -230,6 +298,12 @@ def run(argv: list[str]) -> int:
             notes = [f"needs approval: {', '.join(r['needs_approval'])}" if r["needs_approval"] else "",
                      f"not in store: {', '.join(r['missing'])}" if r["missing"] else "",
                      *[f"error: {e}" for e in r["errors"]], *[f"warning: {w}" for w in r["warnings"]]]
+            lg = r.get("legacy")
+            if lg and lg.get("error"):
+                notes.append(f"old '--project ~' manifest can't be read ({lg['error']}); fix it")
+            elif lg and lg["pending"]:
+                notes.append(f"old '--project ~' setup found ({lg['manifest']}); "
+                             "run: skill-store migrate-global")
             for n in filter(None, notes):
                 print(f"skill-store sync: {n}", file=sys.stderr)
             if as_json:
@@ -291,7 +365,7 @@ def run(argv: list[str]) -> int:
             raise SkillStoreError("use either 'unlink <name>' or 'unlink --all', not both")
         r = ops.unlink_all(ctx)
         txt = ("unlinked: " + ", ".join(r["removed"])) if r["removed"] else \
-            f"nothing to unlink in {r['project']}"
+            f"nothing to unlink in {_where_text(r)}"
         txt += "".join(f"\nerror: {e}" for e in r["errors"])
         _print(r, as_json, txt)
         return 1 if r["errors"] else 0
@@ -304,6 +378,17 @@ def run(argv: list[str]) -> int:
     elif cmd == "status":
         r = ops.status(ctx)
         _print(r, as_json, _fmt_status(r))
+    elif cmd == "migrate-global":
+        r = ops.migrate_global(ctx)
+        if r["legacy"] is None and not r["migrated"]:
+            txt = f"nothing to migrate (no {legacy_home_manifest()})"
+        else:
+            txt = "\n".join([f"{m['state']}: {m['skill']} (global scope)" for m in r["migrated"]]
+                            + [f"over cap: unlinked least recently used {e['skill']}" for e in r["evicted"]]
+                            + [f"not migrated: {n}: {e}" for n, e in r["failed"].items()]
+                            + _fmt_legacy(r["legacy"]))
+        _print(r, as_json, txt)
+        return 1 if r["failed"] else 0
     elif cmd == "prune":
         r = ops.prune(ctx, args.cap)
         txt = "\n".join(f"unlinked {e['skill']} (last used {e['last_used'] or 'never'})" for e in r["evicted"]) \
