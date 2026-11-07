@@ -68,6 +68,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="remove every link into the store (for AO --pre-remove); manifest unchanged")
     p = add("sync", "make the project's links match its manifest (idempotent; for SessionStart)")
     p.add_argument("--quiet", action="store_true", help="no output on success; always exit 0")
+    p.add_argument("--hook-output", action="store_true",
+                   help="for the SessionStart hook: implies --quiet; when links were created, print "
+                        "Claude Code hook JSON that asks it to re-scan skills and tells the user "
+                        "to run /reload-skills if they are missing; otherwise print nothing")
     add("status", "show store skills, approval, links in this project (or --global), global links, "
                   "last use and cap")
     add("migrate-global", "move the old '--project ~' setup to the global scope (links only; "
@@ -229,6 +233,50 @@ def _fmt_pp(name: str, r: dict) -> str:
     return "\n".join(lines)
 
 
+_HOOK_NAMES_SHOWN = 10
+
+
+def _session_start_output(r: dict) -> dict | None:
+    """Claude Code SessionStart hook JSON for a sync result, or None when no link was created.
+
+    Links that a SessionStart hook creates arrive after Claude Code's first skill scan, so the
+    session can miss them. ``reloadSkills`` asks Claude Code to re-scan once the SessionStart hooks
+    finish; ``systemMessage`` is shown to the user (in case the re-scan isn't supported or misses
+    them); ``additionalContext`` tells the model the same. See
+    https://code.claude.com/docs/en/hooks (SessionStart decision control).
+    """
+    created = sorted(set(r.get("linked", [])) | set(r.get("relinked", [])))
+    if r.get("skipped") or not created:
+        return None
+    shown = ", ".join(created[:_HOOK_NAMES_SHOWN])
+    if len(created) > _HOOK_NAMES_SHOWN:
+        shown += f" and {len(created) - _HOOK_NAMES_SHOWN} more"
+    where = "global skills" if r.get("scope") == "global" else "this checkout"
+    noun = "skill" if len(created) == 1 else "skills"
+    return {
+        "systemMessage": f"skill-store linked {len(created)} {noun} into {where} at startup: {shown}. "
+                         "If /skills doesn't list them, run /reload-skills once.",
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": f"skill-store linked these {noun} into {where} after the session's "
+                                 f"first skill scan: {shown}. If one of them is needed but isn't "
+                                 "available, ask the user to run /reload-skills once.",
+            "reloadSkills": True,
+        },
+    }
+
+
+def _emit_hook_json(obj: dict | None) -> None:
+    """Print one JSON object on one line (ASCII only, so no code page can garble it), or nothing."""
+    if obj is None:
+        return
+    try:
+        sys.stdout.write(json.dumps(obj, ensure_ascii=True) + "\n")
+        sys.stdout.flush()
+    except (OSError, ValueError):
+        pass  # stdout closed: the session must still start
+
+
 def _read_hook_stdin() -> str:
     """Hook JSON from stdin as UTF-8, tolerating a BOM. Bytes are decoded explicitly so a
     Windows locale code page never mangles the payload."""
@@ -271,13 +319,27 @@ def _subcommand(argv: list[str]) -> str | None:
     return None
 
 
+def _is_hook_output_flag(tok: str) -> bool:
+    """``--hook-output`` or an abbreviation argparse accepts for it (``--ho`` and longer; ``--h``
+    is ambiguous with ``--help``)."""
+    return len(tok) >= 4 and "--hook-output".startswith(tok)
+
+
+def _never_fails(argv: list[str]) -> bool:
+    """Hook entry points that must exit 0 even on bad arguments."""
+    sub = _subcommand(argv)
+    return sub == "log-usage" or (sub == "sync" and any(_is_hook_output_flag(t) for t in argv))
+
+
 def run(argv: list[str]) -> int:
     parser = build_parser()
-    if _subcommand(argv) == "log-usage":
+    if _never_fails(argv):
         try:
             args = parser.parse_args(argv)
+            if args.command != "log-usage":
+                _check_scope_args(parser, args)
         except SystemExit:
-            return 0  # the hook must never fail the tool call, even on bad arguments
+            return 0  # a hook must never fail the tool call or session start, even on bad arguments
     else:
         args = parser.parse_args(argv)
     if args.command == "log-usage":
@@ -286,7 +348,8 @@ def run(argv: list[str]) -> int:
     as_json = bool(getattr(args, "json", False))
     cmd = args.command
     if cmd == "sync":
-        quiet = args.quiet
+        hook_output = args.hook_output
+        quiet = args.quiet or hook_output
         try:
             r = ops.sync(_ctx(args))
         except BaseException as exc:  # noqa: BLE001 - never fail a session start hard
@@ -306,6 +369,9 @@ def run(argv: list[str]) -> int:
                              "run: skill-store migrate-global")
             for n in filter(None, notes):
                 print(f"skill-store sync: {n}", file=sys.stderr)
+            if hook_output:  # stdout carries only the hook JSON; --json is ignored
+                _emit_hook_json(_session_start_output(r))
+                return 0
             if as_json:
                 _print(r, True, "")
             return 0
@@ -407,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return run(argv)
     except SkillStoreError as exc:
-        if _subcommand(argv) == "log-usage":
+        if _never_fails(argv):
             return 0
         print(f"skill-store: error: {exc}", file=sys.stderr)
         return 1

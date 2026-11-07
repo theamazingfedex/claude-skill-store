@@ -72,15 +72,18 @@ Notes:
 Commit [`settings.project.json`](settings.project.json) into the project's `.claude/settings.json`
 (merge it into the existing `hooks` object if there is one), or install the user-level hook from
 [`settings.windows.json`](settings.windows.json) / [`settings.linux.json`](settings.linux.json).
-Claude Code then runs `skill-store sync --quiet` at every session start, in whichever checkout the
-session opens. This covers checkouts that AO didn't create, and repairs links after a `git pull`
-changed the manifest. The links it creates during startup are **not** seen by that same session:
-they are there for the next one, or after `/reload-skills`.
+Claude Code then runs `skill-store sync --quiet --hook-output` at every session start, in whichever
+checkout the session opens. This covers checkouts that AO didn't create, and repairs links after a
+`git pull` changed the manifest. Links it creates during startup arrive after Claude Code's first
+skill scan, so `--hook-output` then prints SessionStart hook JSON: `reloadSkills` asks Claude Code
+to re-scan (with Claude Code 2.1.319 the links were available on the first prompt), and a notice
+tells the user to run `/reload-skills` once if they're still missing. It prints nothing when no
+link was created.
 
 The bare `skill-store …` command in `settings.project.json` needs `skill-store` on Claude Code's PATH
 and `SKILL_STORE_HOME` (if set) in its environment. Otherwise it fails silently. If that isn't
 guaranteed, use the wrapper snippets or the exec form with the full path plus `--store`:
-`{"type": "command", "command": "<path>/skill-store.exe", "args": ["--store", "<store>", "sync", "--quiet"]}`.
+`{"type": "command", "command": "<path>/skill-store.exe", "args": ["--store", "<store>", "sync", "--quiet", "--hook-output"]}`.
 
 In a project without `.claude/skills.manifest.json`, `sync` does nothing and creates nothing, so a
 user-level hook is harmless in unrelated projects.

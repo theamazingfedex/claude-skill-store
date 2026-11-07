@@ -432,12 +432,40 @@ Two Claude Code hooks connect the store to sessions:
 | Hook | Matcher | Runs | Purpose |
 |---|---|---|---|
 | `PostToolUse` | `Skill` | `skill-store log-usage` | append `{skill, session, project, time}` to `usage.jsonl` (append only; it never writes `store.json`) |
-| `SessionStart` | (all) | `skill-store sync --quiet` | backstop: repair this checkout's links (a session doesn't pick up links the hook creates during its own startup; see [AO worktrees](#ao-worktrees)) |
+| `SessionStart` | (all) | `skill-store sync --quiet --hook-output` | create or repair this checkout's links, and tell Claude Code and the user when it created any (see below) |
 
-Both must never get in the way: `log-usage` always exits 0, and `sync --quiet` prints nothing on
-success, because SessionStart output is added to Claude's context. The snippets follow the
-[Claude Code hooks reference](https://code.claude.com/docs/en/hooks). Merge them into your
-existing `hooks` object instead of replacing it. Check the result with `/hooks` inside Claude Code.
+Both must never get in the way: `log-usage` and `sync --quiet --hook-output` always exit 0.
+
+**What `--hook-output` does.** Claude Code scans skills before SessionStart hooks finish, so links
+the hook creates during startup would otherwise be missed by that session. When `sync` creates or
+re-points at least one link, `--hook-output` prints one line of
+[SessionStart hook JSON](https://code.claude.com/docs/en/hooks#sessionstart) and nothing else:
+
+```json
+{"systemMessage": "skill-store linked 2 skills into this checkout at startup: verify-alpha, verify-beta. If /skills doesn't list them, run /reload-skills once.",
+ "hookSpecificOutput": {"hookEventName": "SessionStart", "reloadSkills": true,
+  "additionalContext": "skill-store linked these skills into this checkout after the session's first skill scan: verify-alpha, verify-beta. If one of them is needed but isn't available, ask the user to run /reload-skills once."}}
+```
+
+(Printed on one line; wrapped here for reading.)
+
+- `reloadSkills: true` asks Claude Code to re-scan the skill directories once the SessionStart
+  hooks finish. With Claude Code 2.1.319 the new links were then available on the first prompt
+  (see [docs/verification.md](docs/verification.md#last-verified)).
+- `systemMessage` is shown to you, e.g. `SessionStart:startup says: skill-store linked …` in the
+  interactive TUI. If the skills still aren't listed (an older Claude Code without the re-scan),
+  run `/reload-skills` once.
+- `additionalContext` gives the model the same note.
+
+When nothing was created (links already in place, only removals, no manifest, no store), it prints
+nothing. Problems go to stderr as with `--quiet`. `--hook-output` implies `--quiet` and ignores
+`--json`, so stdout carries only the hook JSON. It works with `--global sync` too. Without
+`--hook-output`, `sync --quiet` is unchanged and prints nothing on success: plain-text
+SessionStart output would be added to Claude's context.
+
+The snippets follow the [Claude Code hooks reference](https://code.claude.com/docs/en/hooks).
+Merge them into your existing `hooks` object instead of replacing it. Check the result with
+`/hooks` inside Claude Code.
 
 **Recommended setup: user-level, via the wrapper scripts.** These live in `~/.claude/settings.json`,
 so they cover every project and every session, including automated ones in [AO](#ao-worktrees) worktrees. The wrappers in [`hooks/`](hooks/) find
@@ -521,12 +549,17 @@ claude-ss() { skill-store sync; claude "$@"; }
 `sync` exits 0 when there's nothing to do, and the wrapper starts `claude` even if `sync` reports a
 problem.
 
-The SessionStart hook alone is **not enough** for a fresh checkout. It does create the links, but the
-session has already scanned its skills by then. Verified on Windows and Linux: in the interactive TUI (Claude
-Code 2.1.319 on Windows, 2.1.318 on Linux) the session **didn't pick them up at all** until
-`/reload-skills`. With `claude -p` they appeared only from the first turn that started after Claude
-Code's file watcher saw them (a few seconds after launch; turn 2 or later). So keep the hook only as a backstop for later sessions, and if
-you rely on it, run `/reload-skills` once in that first session.
+The SessionStart hook creates the links too, but only after the session has scanned its skills.
+With a plain `sync --quiet` hook, that first session missed them. Verified on Windows and Linux: in the
+interactive TUI (Claude Code 2.1.319 on Windows, 2.1.318 on Linux) the session **didn't pick them up
+at all** until `/reload-skills`. With `claude -p` they appeared only from the first turn that
+started after Claude Code's file watcher saw them (a few seconds after launch; turn 2 or later).
+The snippets therefore use `sync --quiet --hook-output`, which asks Claude Code to re-scan skills
+and tells you to run `/reload-skills` once if they're still missing (see
+[What `--hook-output` does](#enable-the-hooks-usage-tracking-and-session-start-sync)). With Claude
+Code 2.1.319 that made fresh-worktree links available on the first prompt (`claude -p` on Windows
+and Linux, interactive TUI on Linux). Syncing before launch still works on any Claude Code version
+and doesn't depend on folder trust, so keep it as the primary path.
 
 As a `--pre-remove` step, an AO project can run `skill-store unlink --all`, which removes the
 worktree's store links non-recursively, without editing the manifest, before AO deletes the
@@ -571,10 +604,14 @@ Verified on Windows 10 and on Linux (WSL2 Kali) with Claude Code 2.1.318/2.1.319
 - ✅ an **edit** to the store copy is picked up when the skill is invoked again;
 - ✅ a link **removed** mid-session can no longer be invoked (`Unknown skill`). ⚠️ The model isn't
   told about removals, though, so it may still name the skill until a new session starts;
-- ❌/⚠️ links created by the `SessionStart` hook **during startup** are missed by that session. In
-  the interactive TUI they don't appear until `/reload-skills`. In `claude -p` they appear from the
-  first turn that starts after the file watcher sees them (turn 2 or later). Links that exist **before** launch are found on turn 1. So sync before
-  launching (AO `--post-create`): see [AO worktrees](#ao-worktrees);
+- ❌/⚠️ links created by a plain `sync --quiet` `SessionStart` hook **during startup** are missed by
+  that session. In the interactive TUI they don't appear until `/reload-skills`. In `claude -p` they
+  appear from the first turn that starts after the file watcher sees them (turn 2 or later). Links
+  that exist **before** launch are found on turn 1. So sync before launching (AO `--post-create`):
+  see [AO worktrees](#ao-worktrees);
+- ✅ with `sync --quiet --hook-output` (Claude Code 2.1.319), the hook's `reloadSkills` re-scan made
+  those links available on turn 1 (`claude -p` on Windows and Linux, interactive TUI on Linux), and
+  the TUI showed the `/reload-skills` notice;
 - ✅ the `PostToolUse` usage hook logs one line per Skill call; `/skill-doctor` shows per-skill cost.
 
 These results hold on both Windows 10 (junctions) and Linux (WSL2 Kali, symlinks).
@@ -631,8 +668,10 @@ must never be committed. Delete that *file*, make sure the `.gitignore` is in pl
 - `skill-store status`: is it linked in *this* checkout? Approved? Run `skill-store sync`.
 - Did `.claude/skills/` exist when the session started? If not, Claude Code isn't watching it:
   run `/reload-skills` (the committed `.gitignore` prevents this).
-- Fresh worktree or checkout, with links created by the SessionStart hook? That session misses them:
-  run `/reload-skills` once, and sync before launching next time (AO `--post-create`).
+- Fresh worktree or checkout, with links created by the SessionStart hook? With a plain
+  `sync --quiet` hook that session misses them. With `sync --quiet --hook-output` the hook asks
+  Claude Code to re-scan and shows a `/reload-skills` notice. Either way, `/reload-skills` once
+  fixes it; sync before launching next time (AO `--post-create`).
 - **Listing budget:** if the listing overflows, descriptions of rarely used skills are dropped.
   Run `/skill-doctor` (per-skill cost vs use, v2.1.252+; in newer interactive versions it opens the
   Plugins panel's Stats tab). `/doctor` is a general setup check. To free
@@ -682,7 +721,9 @@ bypasses the tool. Test the hook by hand:
 (use a scratch `SKILL_STORE_HOME`).
 
 **SessionStart sync prints into the conversation.** Plain-text SessionStart output is added to
-Claude's context. Use `sync --quiet` (the snippets do).
+Claude's context. Use `sync --quiet --hook-output` (the snippets do): it prints nothing, or one
+line of hook JSON that Claude Code parses instead of adding it as text. Make sure nothing else in
+the hook command (e.g. a shell profile) writes to stdout, or Claude Code can't read the JSON.
 
 **PowerShell refuses to run the hook script** (execution policy). The snippets pass
 `-ExecutionPolicy Bypass` for that one process. Running `Unblock-File hooks\*.ps1` also helps if
@@ -713,11 +754,12 @@ longer exists: the old backup was deleted, and the live version was moved into i
 | `unlink <name>` | remove the link only; remove from manifest |
 | `unlink --all` | remove every store link in this project, non-recursively; manifest unchanged; exits 0 if none |
 | `sync [--quiet]` | make links match the manifest (never writes it); idempotent; no-op (creates nothing) without a manifest |
+| `sync --quiet --hook-output` | SessionStart hook entry point: as `sync --quiet`, plus one line of hook JSON (`reloadSkills` and a `/reload-skills` notice) when it created links, otherwise no output; always exits 0 |
 | `status` | skills, approval, manifest, linked here, linked globally, check result, last used, cap usage |
 | `prune [--cap N]` | unlink LRU skills down to the cap and remove them from the manifest (on demand only) |
 | `--global link <name>` | the same as `link`, into `$CLAUDE_CONFIG_DIR/skills` or `~/.claude/skills`; manifest `<store>/global.manifest.json` |
 | `--global unlink <name>` / `--global unlink --all` | remove global store links only, non-recursively; foreign entries are never touched |
-| `--global sync [--quiet]` | make global links match the global manifest; no-op without one; prints the migration notice if `--project ~` was used |
+| `--global sync [--quiet] [--hook-output]` | make global links match the global manifest; no-op without one; prints the migration notice if `--project ~` was used |
 | `--global status` | global links, cap usage, entries left alone, migration notice |
 | `--global prune [--cap N]` | unlink LRU global links down to the global cap |
 | `migrate-global` | move the old `--project ~` setup to the global scope: links only, deletes no files, prints the cleanup commands |
@@ -726,8 +768,8 @@ longer exists: the old backup was deleted, and the live version was moved into i
 Global flags (before or after the command): `--store PATH`, `--project PATH` or `--global`
 (not both), `--json`, plus `--version`. `skill-store <command> --help` is authoritative.
 
-Exit codes: `0` = ok, `1` = refused or failed, `2` = usage error (e.g. `--global` with `--project`). Exceptions: `log-usage` and
-`sync --quiet` always exit 0, and plain `sync` exits 1 only if an operation errored.
+Exit codes: `0` = ok, `1` = refused or failed, `2` = usage error (e.g. `--global` with `--project`). Exceptions: `log-usage`,
+`sync --quiet` and `sync --hook-output` always exit 0 (`log-usage` and `--hook-output` even on bad arguments), and plain `sync` exits 1 only if an operation errored.
 
 ## Running tests
 
@@ -768,7 +810,7 @@ sh scripts/test-local.sh --other-volume /mnt/c/Users/<you>/AppData/Local/Temp --
 | `tests/` | tests for link/unlink/sync/prune safety and the build pipeline: `pip install -e ".[test]"` then `pytest` |
 | `.github/workflows/` | CI (ubuntu + windows × Python 3.10 / 3.12), **manual-only** (`workflow_dispatch`): never runs on push or PR and is never required; running it uses the account's free included Actions minutes |
 | `scripts/` | local test runners: `test-local.ps1` (Windows, `-Wsl` for WSL too) and `test-local.sh` (Linux/WSL); see [Running tests](#running-tests) |
-| `hooks/` | Claude Code hook wrappers (`log-usage`, `sync --quiet`) |
+| `hooks/` | Claude Code hook wrappers (`log-usage`, `sync --quiet --hook-output`) |
 | `snippets/` | `settings.json` snippets (Windows, Linux, direct), CLAUDE.md safety section, AO worktree setup |
 | `docs/` | [design rationale](docs/design.md), [build recipe](docs/build-recipe.md), [schemas](docs/schemas.md), [verification checklist](docs/verification.md) |
 
