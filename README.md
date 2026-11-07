@@ -777,5 +777,7 @@ Contributors: tests and development must **never** touch the real `~/.claude`, `
 
 ## License
 
-No LICENSE file is included yet. That choice is left to the repository owner, so until one is
-added, all rights are reserved by default.
+This project is dedicated to the public domain under
+[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/). See [LICENSE](LICENSE)
+for the full legal code. CC0 covers this repository's own code and docs, not the third-party
+documentation that `skill-store` scrapes into your store, which keeps its original license.
