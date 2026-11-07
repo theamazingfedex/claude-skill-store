@@ -14,6 +14,9 @@ Linux/macOS) into the shared user-level skills store (`~/.skill-store/skills/`).
 - If you must remove one link by hand: Windows `cmd /c rmdir .claude\skills\<name>` or
   `[System.IO.Directory]::Delete('.claude\skills\<name>', $false)`; Linux/macOS `rm .claude/skills/<name>`
   or `unlink .claude/skills/<name>` (no `-r`, no trailing slash).
+- The same rule holds for store links in the user-level `~/.claude/skills/` (the global scope):
+  manage them only with `skill-store --global link|unlink|sync|prune`, and never touch the other
+  entries there (other tools' links, `synced/`, `.trash/`, real directories).
 - **Never use the vercel `skills` CLI `remove`** (`npx skills remove`): it deletes the canonical copy,
   not just the link. Never use `skill-seekers install-agent` either; it copies into `~/.claude/skills`.
 - Never commit anything under `.claude/skills/` except its `.gitignore`: git follows junctions and

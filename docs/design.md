@@ -44,7 +44,8 @@ is versioned in its own repo (this one). Each project commits only its **manifes
 - `store.json`: the registry (source, version or pinned URL, build date, approval, last use);
 - `usage.jsonl`: one line per Skill tool call.
 
-The store stays **out of** `~/.claude/skills`, `~/.agents` and every project repo:
+The store stays **out of** `~/.claude/skills`, `~/.agents` and every project repo (the
+[global scope](#linking-at-global-scope) only puts *links* into `~/.claude/skills`):
 - Claude Code actively manages `~/.claude/skills`, and claude.ai sync moves folders to `.trash`.
 - `~/.agents` is owned by the vercel `skills` CLI.
 
@@ -77,6 +78,38 @@ licenses (e.g. CC BY, or a vendor's copyright).
   appeared in `claude -p` only from the first turn that started after the file watcher saw them
   (turn 2 or later), and **not at all until `/reload-skills`** in the interactive TUI. This was seen
   on Windows (2.1.319) and Linux (2.1.318). Links created later in a session are picked up normally.
+
+### Linking at global scope
+
+`~/.claude/skills/<name>` → `<store>/skills/<name>` (or `$CLAUDE_CONFIG_DIR/skills/<name>` when
+`CLAUDE_CONFIG_DIR` is set), with `skill-store --global …`.
+
+- **Why a scope and not `--project ~`.** Treating the home directory as a project wrote a
+  committed-style manifest and a `.gitignore` into `~/.claude`, a directory Claude Code manages
+  itself, and let project commands run there with project semantics. The global scope keeps
+  everything skill-store owns in the store: its manifest is `<store>/global.manifest.json`, and
+  it writes nothing into `~/.claude/skills` except its own links.
+- **Same rules as projects.** The same approval gate and admission check, the same idempotent
+  `sync`, and the same LRU cap (default 8), counted separately from every project. Only links that
+  resolve into the store are removed, one at a time and non-recursively.
+- **Shared directory.** Unlike a project's `.claude/skills`, the user-level directory is shared
+  with other tools: links from the vercel `skills` CLI, the claude.ai `synced/` folder, `.trash/`
+  and hand-made skills. All of them are left alone. A name already taken by one of them is a
+  refusal (`link`) or a reported conflict (`sync`), never an overwrite. If the directory is itself a
+  link, the global commands refuse to manage it.
+- **Chained links.** A store entry may itself be a link to a checkout. The global link points at
+  the store entry, so the chain is `~/.claude/skills/<name>` → store → checkout. A link counts as a
+  store link if its target, or the target's resolved path, is a direct child of `<store>/skills`.
+  Unlinking removes only the first link.
+- **No session-start step.** Global links are outside every checkout, so new worktrees need
+  nothing. `--global sync` is run by hand, after editing the global manifest or to repair links.
+- **Every global link costs listing budget in every session.** That is why the global scope has its
+  own cap, and why project-specific skills belong in project manifests.
+- **Migration.** The old `~/.claude/skills.manifest.json` is detected and only read. `status` and
+  `--global sync` print the exact commands; `migrate-global` links each listed skill globally,
+  adopting the existing link. Until then, global `sync`/`prune` leave the old setup's links alone
+  and don't count them. Once a global manifest exists, project commands refuse a project whose
+  skills directory is the global one, so the two scopes never manage one directory.
 
 ### Unlink safety (standing rule)
 

@@ -10,19 +10,27 @@ files in `schemas/` win.
 |---|---|
 | Store root | `--store PATH` > `SKILL_STORE_HOME` env var > `~/.skill-store` (`%USERPROFILE%\.skill-store`) |
 | Project root | `--project PATH` > `CLAUDE_PROJECT_DIR` env var > git toplevel of the cwd > cwd |
+| Global skills dir (`--global`) | `CLAUDE_CONFIG_DIR` env var + `/skills` > `~/.claude/skills` (`%USERPROFILE%\.claude\skills`) |
+| Global manifest | always `<store>/global.manifest.json` |
 
 ```
 <store>/
 ├── skills/<name>/          linkable skill: SKILL.md + references/
 ├── build/<name>/           skill-seekers working dir + raw scraped pages
 ├── store.json              registry
-└── usage.jsonl             usage log
+├── usage.jsonl             usage log
+└── global.manifest.json    which skills the global scope links (created by --global link)
 
 <project>/.claude/
 ├── skills.manifest.json    committed: which skills this project links
 └── skills/
     ├── .gitignore          committed: "*" and "!.gitignore"
     └── <name>  ──link──►   <store>/skills/<name>   (junction on Windows, symlink elsewhere)
+
+$CLAUDE_CONFIG_DIR or ~/.claude/        (global scope; no manifest and no .gitignore here)
+└── skills/
+    ├── <name>  ──link──►   <store>/skills/<name>   (store links: managed by --global)
+    └── ...                 everything else (other tools' links, synced/, .trash/, real dirs): never touched
 ```
 
 ## Project manifest: `<project>/.claude/skills.manifest.json`
@@ -50,6 +58,38 @@ digit, at most 64 chars.
 Who writes it: `init-project` creates it. `link`, `unlink <name>` and `prune` edit it. **`sync`
 and `unlink --all` never write it**, so session starts and worktree removal don't create git diffs.
 Editing it by hand and running `sync` is fine.
+
+## Global manifest: `<store>/global.manifest.json`
+
+Used by `--global`. It lives in the store, not in `~/.claude`, and has the same format as a
+project manifest. Schema: [`schemas/global-manifest.schema.json`](../schemas/global-manifest.schema.json);
+example: [`examples/global.manifest.json`](../examples/global.manifest.json).
+
+```json
+{
+  "version": 1,
+  "cap": 8,
+  "skills": ["blender-asset"]
+}
+```
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `$schema` | string | no | Optional pointer to `schemas/global-manifest.schema.json` for editors |
+| `version` | `1` | yes | Schema version |
+| `cap` | integer | no (default **8**) | Max store skills linked globally. Separate from every project's cap. `--global link` past it unlinks the least recently used global link and drops it from `skills` |
+| `skills` | array of skill names | yes | Skills to link into the global skills dir. `--global sync` links those that are approved and pass `check` (up to `cap`, most recently used first) and removes global store links not listed |
+
+Who writes it: `--global link` creates it. `--global link`, `--global unlink <name>`,
+`--global prune` and `migrate-global` edit it. `--global sync` and `--global unlink --all` never
+write it. Editing it by hand and running `skill-store --global sync` is fine.
+
+### The old `--project ~` manifest
+
+`~/.claude/skills.manifest.json` (and `~/.claude/skills/.gitignore`) are what
+`skill-store --project ~ link <name>` wrote before the global scope existed. skill-store only
+reads that file, to print migration commands and to run `migrate-global`. It never deletes or
+edits it. See [Moving from `--project ~`](../README.md#moving-from---project-).
 
 ## `.claude/skills/.gitignore`
 

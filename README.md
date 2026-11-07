@@ -2,8 +2,9 @@
 
 A user-level **skills store** for [Claude Code](https://code.claude.com/docs). You acquire skills
 once into a store outside every project. Each project then links in only the small,
-approved, capped set it needs. Pruning **unlinks and never deletes**, so a skill can be
-re-linked later without being rebuilt or re-downloaded.
+approved, capped set it needs, and a few skills you want everywhere can be linked into
+`~/.claude/skills` with the [global scope](#global-scope). Pruning **unlinks and never deletes**,
+so a skill can be re-linked later without being rebuilt or re-downloaded.
 
 Works on **Windows** (NTFS junctions, no admin or Developer Mode needed) and **Linux/macOS**
 (symlinks).
@@ -15,6 +16,7 @@ Works on **Windows** (NTFS junctions, no admin or Developer Mode needed) and **L
 - [Initialize the store](#initialize-the-store)
 - [Set up a project](#set-up-a-project-manifest-and-gitignore)
 - [Build a skill](#build-a-skill) · [Approve it](#approve-a-skill) · [Link, unlink, sync](#link-unlink-sync-status)
+- [Global scope](#global-scope): [Windows](#global-scope-on-windows-powershell) · [Linux](#global-scope-on-linux-bash) · [Moving from `--project ~`](#moving-from---project-)
 - [Cap and pruning](#cap-and-pruning)
 - [Enable the hooks](#enable-the-hooks-usage-tracking-and-session-start-sync)
 - [Unlink safety (hard rule)](#unlink-safety-hard-rule)
@@ -67,7 +69,9 @@ Background and measurements: [docs/design.md](docs/design.md).
 - **sync** at session start makes the links in a checkout match its manifest (new worktrees
   start with no links);
 - past the cap, the **least recently used** link is unlinked automatically and reported;
-- the **usage hook** logs each Skill tool call, which is what "least recently used" is based on.
+- the **usage hook** logs each Skill tool call, which is what "least recently used" is based on;
+- optionally, `--global` links a skill into `~/.claude/skills` for **every** project, with its own
+  manifest (in the store) and its own cap: see [Global scope](#global-scope).
 
 The store lives outside `~/.claude/skills` (Claude Code manages that directory itself), outside
 `~/.agents` (owned by the vercel `skills` CLI), and outside every repo. Scraped docs are
@@ -278,6 +282,122 @@ Run it after `git pull` changes a manifest, and in every new checkout or worktre
 
 Under the hood: Windows creates an NTFS **junction** (like `New-Item -ItemType Junction` /
 `mklink /J`), and Linux/macOS an ordinary **symlink** (`ln -s`).
+
+## Global scope
+
+Some skills are useful in every project. The global scope links a store skill into the
+user-level Claude Code skills directory instead of a project:
+
+```
+~/.claude/skills/<name>  ──link──►  <store>/skills/<name>  [──link──►  a checkout, if the store entry is itself a link]
+```
+
+- **Target directory:** `$CLAUDE_CONFIG_DIR/skills` if `CLAUDE_CONFIG_DIR` is set, otherwise
+  `~/.claude/skills` (Windows: `%USERPROFILE%\.claude\skills`). It is created if missing.
+  skill-store **never** writes a `.gitignore` or a manifest there.
+- **Manifest:** `<store>/global.manifest.json` (same format as a project manifest; see
+  [docs/schemas.md](docs/schemas.md#global-manifest-storeglobalmanifestjson)). `--global link`
+  creates it.
+- **Cap:** its own, default **8**, separate from every project's. To change it, set `"cap": N` in
+  `<store>/global.manifest.json`. Linking past it unlinks the least recently used **global** link.
+- **Approval:** the same gate as projects. `skill-store approve <name>` is needed once per skill,
+  whichever scope it is linked into.
+- **Safety:** the same rules as projects. Only links that resolve into the store are ever removed,
+  one at a time and non-recursively. Everything else in `~/.claude/skills` is left alone: links
+  made by other tools (e.g. the vercel `skills` CLI, which points into `~/.agents`), `synced/`,
+  `.trash/` and real skill directories. If one of those already uses a skill's name, `link`
+  refuses and `sync` reports it as a conflict. If `~/.claude/skills` is itself a link, the global
+  commands refuse to manage it.
+- **A store entry that is a link works too.** If `<store>/skills/<name>` is a junction or symlink
+  to a git checkout, the global link points at the store entry, and Claude Code follows both.
+  Unlinking removes only the global link; the store entry and the checkout are untouched.
+- **Status:** `skill-store --global status` lists global links and cap usage. Plain
+  `skill-store status` in a project adds a `global` column and a `global: N/cap` line, so you can
+  see which skills every session already gets. A skill linked globally does not need to be linked
+  into a project too.
+- `--global` cannot be combined with `--project`. It works with `link`, `unlink`,
+  `unlink --all`, `sync`, `status` and `prune`. The flag can go before or after the command.
+
+Every global link costs listing budget in **every** session on the machine, so keep the global
+set small and put project-specific skills in project manifests.
+
+Claude Code's docs allow a skill entry in `~/.claude/skills` to be a link to a directory elsewhere,
+as in a project. The recorded live-session results in
+[docs/verification.md](docs/verification.md#last-verified) cover project-scope links; run the same
+checklist with `--global` to confirm global links on your setup.
+
+### Global scope on Windows (PowerShell)
+
+```powershell
+skill-store approve blender-asset             # once per skill; your decision
+skill-store --global link blender-asset       # creates $HOME\.claude\skills\blender-asset (a junction)
+skill-store --global status                   # global links, cap usage, entries left alone
+skill-store --global sync                     # make global links match <store>\global.manifest.json
+skill-store --global unlink blender-asset     # removes only the link and drops it from the global manifest
+skill-store --global unlink --all             # removes every global store link; manifest unchanged
+skill-store --global prune --cap 4            # unlink least recently used global links down to 4
+
+Get-Item "$HOME\.claude\skills\blender-asset" | Select-Object LinkType, Target   # inspect a link
+```
+
+### Global scope on Linux (bash)
+
+```bash
+skill-store approve blender-asset             # once per skill; your decision
+skill-store --global link blender-asset       # creates ~/.claude/skills/blender-asset (a symlink)
+skill-store --global status                   # global links, cap usage, entries left alone
+skill-store --global sync                     # make global links match <store>/global.manifest.json
+skill-store --global unlink blender-asset     # removes only the link and drops it from the global manifest
+skill-store --global unlink --all             # removes every global store link; manifest unchanged
+skill-store --global prune --cap 4            # unlink least recently used global links down to 4
+
+readlink ~/.claude/skills/blender-asset       # inspect a link
+```
+
+Global links live outside every checkout, so new worktrees need nothing for them: there is no
+global step at session start. Run `skill-store --global sync` after you edit
+`<store>/global.manifest.json` by hand, or to repair global links.
+
+### Moving from `--project ~`
+
+Before the global scope existed, the only way to link a skill everywhere was to treat the home
+directory as a project (`skill-store --project ~ link <name>`). That wrote
+`~/.claude/skills.manifest.json` and `~/.claude/skills/.gitignore`. skill-store detects that
+file: `--global status`, `--global sync` and plain `status` print an `old setup found` notice
+with the exact commands for your machine. To move:
+
+```powershell
+skill-store --global status            # shows the "old setup found" notice and the commands
+skill-store migrate-global             # adds every skill the old manifest lists to the global scope;
+                                       # existing links are kept as they are; no files are deleted
+[System.IO.File]::Delete("$HOME\.claude\skills.manifest.json")
+[System.IO.File]::Delete("$HOME\.claude\skills\.gitignore")
+skill-store --global status            # the notice is gone
+```
+
+```bash
+skill-store --global status            # shows the "old setup found" notice and the commands
+skill-store migrate-global             # adds every skill the old manifest lists to the global scope;
+                                       # existing links are kept as they are; no files are deleted
+rm -- ~/.claude/skills.manifest.json ~/.claude/skills/.gitignore
+skill-store --global status            # the notice is gone
+```
+
+- `migrate-global` is the same as running `skill-store --global link <name>` for each skill the
+  old manifest lists. It copies the old manifest's `cap`, if it had one, into a new global
+  manifest. Skills that are no longer approved or no longer pass `check` are reported and their
+  links are left in place.
+- The notice only lists `~/.claude/skills/.gitignore` when it is still the unchanged file
+  skill-store wrote. Delete files with the commands above only (they remove single files, never
+  directories).
+- If `CLAUDE_CONFIG_DIR` points somewhere else, the old links in `~/.claude/skills` are no longer
+  read by Claude Code. The notice then also lists `skill-store --project <home> unlink --all`, which
+  removes those old store links only.
+- Until you migrate, `--global sync` and `--global prune` leave the old setup's links alone and
+  don't count them toward the global cap.
+- Once `<store>/global.manifest.json` exists, project commands refuse a project whose
+  `.claude/skills` is the global skills directory (`--project ~`), so the two can't fight over it.
+  Use `--global` instead.
 
 ## Cap and pruning
 
@@ -587,22 +707,28 @@ longer exists: the old backup was deleted, and the live version was moved into i
 | `unlink <name>` | remove the link only; remove from manifest |
 | `unlink --all` | remove every store link in this project, non-recursively; manifest unchanged; exits 0 if none |
 | `sync [--quiet]` | make links match the manifest (never writes it); idempotent; no-op (creates nothing) without a manifest |
-| `status` | skills, approval, manifest, linked here, check result, last used, cap usage |
+| `status` | skills, approval, manifest, linked here, linked globally, check result, last used, cap usage |
 | `prune [--cap N]` | unlink LRU skills down to the cap and remove them from the manifest (on demand only) |
+| `--global link <name>` | the same as `link`, into `$CLAUDE_CONFIG_DIR/skills` or `~/.claude/skills`; manifest `<store>/global.manifest.json` |
+| `--global unlink <name>` / `--global unlink --all` | remove global store links only, non-recursively; foreign entries are never touched |
+| `--global sync [--quiet]` | make global links match the global manifest; no-op without one; prints the migration notice if `--project ~` was used |
+| `--global status` | global links, cap usage, entries left alone, migration notice |
+| `--global prune [--cap N]` | unlink LRU global links down to the global cap |
+| `migrate-global` | move the old `--project ~` setup to the global scope: links only, deletes no files, prints the cleanup commands |
 | `log-usage` | hook entry point: read hook JSON on stdin, append to `usage.jsonl`; always exits 0 |
 
-Global flags (before or after the command): `--store PATH`, `--project PATH`, `--json`, plus
-`--version`. `skill-store <command> --help` is authoritative.
+Global flags (before or after the command): `--store PATH`, `--project PATH` or `--global`
+(not both), `--json`, plus `--version`. `skill-store <command> --help` is authoritative.
 
-Exit codes: `0` = ok, `1` = refused or failed, `2` = usage error. Exceptions: `log-usage` and
+Exit codes: `0` = ok, `1` = refused or failed, `2` = usage error (e.g. `--global` with `--project`). Exceptions: `log-usage` and
 `sync --quiet` always exit 0, and plain `sync` exits 1 only if an operation errored.
 
 ## Running tests
 
 Tests run locally; hosted CI is optional and manual-only. Each script creates (or reuses) a
 venv in the system temp dir (not the repo), runs `pip install -e ".[test]"` and then pytest, and
-exits non-zero if anything fails. The tests redirect `HOME`/`USERPROFILE`/`SKILL_STORE_HOME`
-to temp dirs and never touch the real `~/.claude`, `~/.agents` or `~/.skill-store`.
+exits non-zero if anything fails. The tests redirect `HOME`/`USERPROFILE`/`SKILL_STORE_HOME`/
+`CLAUDE_CONFIG_DIR` to temp dirs and never touch the real `~/.claude`, `~/.agents` or `~/.skill-store`.
 
 Windows (PowerShell), optionally also inside WSL:
 
@@ -632,7 +758,7 @@ sh scripts/test-local.sh --other-volume /mnt/c/Users/<you>/AppData/Local/Temp --
 |---|---|
 | `skillstore/` | the Python CLI (`skill-store`, `python -m skillstore`) |
 | `bin/` | thin `skill-store.ps1` / `.sh` / `.cmd` wrappers |
-| `schemas/`, `examples/` | JSON Schemas (manifest, store, usage record, recipe); example manifest, `store.json`, recipes |
+| `schemas/`, `examples/` | JSON Schemas (project and global manifest, store, usage record, recipe); example manifests, `store.json`, recipes |
 | `tests/` | tests for link/unlink/sync/prune safety and the build pipeline: `pip install -e ".[test]"` then `pytest` |
 | `.github/workflows/` | CI (ubuntu + windows × Python 3.10 / 3.12), **manual-only** (`workflow_dispatch`): never runs on push or PR and is never required; running it uses the account's free included Actions minutes |
 | `scripts/` | local test runners: `test-local.ps1` (Windows, `-Wsl` for WSL too) and `test-local.sh` (Linux/WSL); see [Running tests](#running-tests) |
