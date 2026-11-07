@@ -108,6 +108,10 @@ def _fmt_legacy(lg: dict | None) -> list[str]:
     if not lg:
         return []
     lines = [f"old setup found: {lg['manifest']} (written by '--project ~')"]
+    if lg.get("error"):
+        return lines + [f"  it can't be read: {lg['error']}",
+                        "  fix it, then run: skill-store migrate-global. Until then, global sync and "
+                        "prune leave every unlisted store link alone"]
     if lg["pending"]:
         lines.append(f"  not yet in the global scope: {', '.join(lg['pending'])}")
         lines.append(f"  move to the global scope ({lg['shell']}):")
@@ -295,7 +299,9 @@ def run(argv: list[str]) -> int:
                      f"not in store: {', '.join(r['missing'])}" if r["missing"] else "",
                      *[f"error: {e}" for e in r["errors"]], *[f"warning: {w}" for w in r["warnings"]]]
             lg = r.get("legacy")
-            if lg and lg["pending"]:
+            if lg and lg.get("error"):
+                notes.append(f"old '--project ~' manifest can't be read ({lg['error']}); fix it")
+            elif lg and lg["pending"]:
                 notes.append(f"old '--project ~' setup found ({lg['manifest']}); "
                              "run: skill-store migrate-global")
             for n in filter(None, notes):

@@ -78,7 +78,11 @@ def resolve_claude_config() -> Path:
 
 
 def legacy_home_manifest() -> Path:
-    """Where the old ``--project ~`` workaround wrote its manifest."""
+    """Where the old ``--project ~`` workaround wrote its manifest.
+
+    Deliberately ``~/.claude`` and not ``$CLAUDE_CONFIG_DIR``: ``--project ~`` treated the home
+    dir as a project, and a project's manifest is always ``<project>/.claude/``, whatever
+    ``CLAUDE_CONFIG_DIR`` says. Don't "fix" this to follow ``resolve_claude_config()``."""
     return (Path.home() / ".claude" / "skills.manifest.json").absolute()
 
 

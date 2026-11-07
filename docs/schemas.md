@@ -89,7 +89,9 @@ write it. Editing it by hand and running `skill-store --global sync` is fine.
 `~/.claude/skills.manifest.json` (and `~/.claude/skills/.gitignore`) are what
 `skill-store --project ~ link <name>` wrote before the global scope existed. skill-store only
 reads that file, to print migration commands and to run `migrate-global`. It never deletes or
-edits it. See [Moving from `--project ~`](../README.md#moving-from---project-).
+edits it. The path is always `~/.claude/skills.manifest.json`, even when `CLAUDE_CONFIG_DIR` is
+set, because a project's manifest is always `<project>/.claude/`. If the file can't be read, no
+delete command is printed and `migrate-global` refuses. See [Moving from `--project ~`](../README.md#moving-from---project-).
 
 ## `.claude/skills/.gitignore`
 

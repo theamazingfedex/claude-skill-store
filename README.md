@@ -394,7 +394,13 @@ skill-store --global status            # the notice is gone
   read by Claude Code. The notice then also lists `skill-store --project <home> unlink --all`, which
   removes those old store links only.
 - Until you migrate, `--global sync` and `--global prune` leave the old setup's links alone and
-  don't count them toward the global cap.
+  don't count them toward the global cap. `--global unlink <name>` and `--global unlink --all` are
+  different: they remove store links whatever listed them, including old-setup links you haven't
+  migrated yet. Run `migrate-global` first if you want to keep those.
+- If `~/.claude/skills.manifest.json` can't be read, the notice says so and prints no delete
+  command. `migrate-global` refuses, and global `sync` and `prune` leave every store link that the
+  global manifest doesn't list alone. Fix the file (or check what it listed and delete it
+  yourself), then migrate.
 - Once `<store>/global.manifest.json` exists, project commands refuse a project whose
   `.claude/skills` is the global skills directory (`--project ~`), so the two can't fight over it.
   Use `--global` instead.

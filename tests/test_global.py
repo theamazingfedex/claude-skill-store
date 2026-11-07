@@ -426,3 +426,43 @@ def test_migrate_global_reports_unapproved(env):
     rc, r, _ = env.gjson("migrate-global")
     assert rc == 1 and "approve alpha" in r["failed"]["alpha"]
     assert links.is_link(env.global_dir / "alpha")   # left in place
+
+
+def test_unreadable_legacy_manifest_is_kept_and_protected(env):
+    for n in ("alpha", "beta", "gamma"):
+        env.add_skill(n)
+    legacy = _old_workaround(env, "alpha")
+    assert env.gjson("link", "beta")[0] == 0
+    legacy.write_text("{not json")                      # damaged old list
+    damaged = legacy.read_text()
+
+    rc, r, _ = env.gjson("status")
+    lg = r["legacy"]
+    assert lg["error"] and lg["commands"] == []         # no delete command for a damaged file
+    rc, out, _ = env.run_raw("--global", "status")
+    assert "can't be read" in out and "Delete" not in out and "rm --" not in out
+
+    rc, _, err = env.run_raw("migrate-global")
+    assert rc == 1 and "cannot migrate" in err
+    assert legacy.read_text() == damaged
+
+    # sync and prune keep every unlisted store link, since the old list can't be read
+    env.global_manifest_path.write_text(json.dumps({"version": 1, "skills": ["beta", "gamma"]}))
+    rc, r, _ = env.gjson("sync")
+    assert r["legacy_kept"] == ["alpha"] and r["removed"] == [] and r["linked"] == ["gamma"]
+    rc, r, _ = env.gjson("prune", "--cap", "0")
+    assert sorted(e["skill"] for e in r["evicted"]) == ["beta", "gamma"]
+    assert links.is_link(env.global_dir / "alpha")
+    rc, _, err = env.run_raw("--global", "sync", "--quiet")
+    assert rc == 0 and "can't be read" in err
+
+
+def test_global_unlink_all_also_removes_unmigrated_links(env):
+    """Documented: unlink --all removes every store link, whatever listed it."""
+    for n in ("alpha", "beta"):
+        env.add_skill(n)
+    _old_workaround(env, "alpha")
+    assert env.gjson("link", "beta")[0] == 0
+    rc, r, _ = env.gjson("unlink", "--all")
+    assert rc == 0 and sorted(r["removed"]) == ["alpha", "beta"]
+    assert (env.store_root / "skills" / "alpha" / "SKILL.md").is_file()

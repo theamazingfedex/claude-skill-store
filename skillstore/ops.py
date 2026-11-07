@@ -105,6 +105,9 @@ def _legacy_only(ctx: Ctx, manifest: Manifest | None) -> set[str]:
     if legacy is None or not same_dir(legacy.path.parent / "skills", ctx.globals.skills):
         return set()
     listed = set(manifest.skills) if manifest else set()
+    if legacy.error:
+        # The old list can't be read, so any unlisted store link may belong to it: keep them all.
+        return {n for n in store_links(ctx) if n not in listed}
     return {n for n in legacy.skills if n not in listed}
 
 
@@ -136,13 +139,18 @@ def _iso(dt):
 # the old "--project ~" workaround
 # ---------------------------------------------------------------------------------------
 def _load_legacy(ctx: Ctx) -> Manifest | None:
+    """The old manifest, or None if there is none. If it can't be read, the result has no
+    skills and ``.error`` set: callers must not treat that as an empty list."""
     path = legacy_home_manifest()
     if not path.is_file():
         return None
     try:
-        return Manifest.load(ProjectPaths(path.parent.parent))
-    except SkillStoreError:
-        return Manifest(path, {"version": 1, "skills": []})
+        legacy = Manifest.load(ProjectPaths(path.parent.parent))
+        legacy.error = None
+    except SkillStoreError as exc:
+        legacy = Manifest(path, {"version": 1, "skills": []})
+        legacy.error = str(exc)
+    return legacy
 
 
 def _q(path: Path | str) -> str:
@@ -159,6 +167,12 @@ def legacy_info(ctx: Ctx) -> dict | None:
     if legacy is None:
         return None
     home_project = ProjectPaths(legacy.path.parent.parent)
+    shell = "powershell" if IS_WINDOWS else "sh"
+    if legacy.error:
+        # Unreadable: print no migrate or delete command, so a damaged list is never thrown away.
+        return {"manifest": str(legacy.path), "error": legacy.error, "skills": [], "pending": [],
+                "same_skills_dir": same_dir(home_project.skills, ctx.globals.skills),
+                "gitignore": None, "shell": shell, "commands": []}
     try:
         gm = Manifest.load(ctx.globals)
     except SkillStoreError:
@@ -171,7 +185,6 @@ def legacy_info(ctx: Ctx) -> dict | None:
         managed_gi = gi.is_file() and not is_link(gi) and gi.read_text(encoding="utf-8") == GITIGNORE_TEXT
     except OSError:
         managed_gi = False
-    shell = "powershell" if IS_WINDOWS else "sh"
     commands = []
     if pending:
         commands.append("skill-store migrate-global")
@@ -185,7 +198,7 @@ def legacy_info(ctx: Ctx) -> dict | None:
         commands += [f"[System.IO.File]::Delete({_q(f)})" for f in files]
     else:
         commands.append("rm -- " + " ".join(_q(f) for f in files))
-    return {"manifest": str(legacy.path), "skills": list(legacy.skills), "pending": pending,
+    return {"manifest": str(legacy.path), "error": None, "skills": list(legacy.skills), "pending": pending,
             "same_skills_dir": shared, "gitignore": str(gi) if managed_gi else None,
             "shell": shell, "commands": commands}
 
@@ -508,6 +521,10 @@ def migrate_global(ctx: Ctx) -> dict:
     result = {"legacy": before, "migrated": [], "failed": {}, "evicted": []}
     if before is None:
         return result
+    if before["error"]:
+        raise SkillStoreError(
+            f"cannot migrate: {before['error']}. Fix the file, or check what it listed and delete "
+            "it yourself; nothing was changed")
     legacy = _load_legacy(ctx)
     gm = _load_or_new_manifest(ctx)
     if not gm.path.exists():
