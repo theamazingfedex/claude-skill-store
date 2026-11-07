@@ -1,7 +1,7 @@
 """Test isolation.
 
-Every test runs with HOME, USERPROFILE and SKILL_STORE_HOME redirected into its own temp
-dir, CLAUDE_PROJECT_DIR unset, and ``claude plugin validate`` disabled. A session-level guard
+Every test runs with HOME, USERPROFILE, SKILL_STORE_HOME and CLAUDE_CONFIG_DIR redirected into
+its own temp dir, CLAUDE_PROJECT_DIR unset, and ``claude plugin validate`` disabled. A session-level guard
 also snapshots the *real* ``~/.claude/skills``, ``~/.agents`` and ``~/.skill-store`` before the
 run and fails the session if any of them changed.
 """
@@ -24,6 +24,8 @@ from skillstore.store import Store  # noqa: E402
 
 _REAL_HOME = Path(os.path.expanduser("~"))
 _GUARDED = [_REAL_HOME / ".claude" / "skills", _REAL_HOME / ".agents", _REAL_HOME / ".skill-store"]
+if os.environ.get("CLAUDE_CONFIG_DIR"):
+    _GUARDED.append(Path(os.environ["CLAUDE_CONFIG_DIR"]).expanduser() / "skills")
 
 
 def _snapshot():
@@ -57,6 +59,7 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("SKILL_STORE_HOME", str(tmp_path / "store"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / ".claude"))
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     monkeypatch.delenv("SKILL_STORE_SKILL_SEEKERS", raising=False)
     monkeypatch.setattr(postprocess, "find_claude", lambda: None)
@@ -76,6 +79,29 @@ class Env:
     @property
     def skills_dir(self) -> Path:
         return self.project / ".claude" / "skills"
+
+    @property
+    def global_dir(self) -> Path:
+        """The global skills dir: $CLAUDE_CONFIG_DIR/skills (always inside the temp home)."""
+        return Path(os.environ["CLAUDE_CONFIG_DIR"]) / "skills"
+
+    @property
+    def global_manifest_path(self) -> Path:
+        return self.store_root / "global.manifest.json"
+
+    def global_manifest(self) -> dict:
+        return json.loads(self.global_manifest_path.read_text())
+
+    def run_raw(self, *args: str):
+        """Run the CLI without the implicit --project."""
+        self.capsys.readouterr()
+        rc = cli.main(list(args))
+        out = self.capsys.readouterr()
+        return rc, out.out, out.err
+
+    def gjson(self, *args: str):
+        rc, out, err = self.run_raw("--global", *args, "--json")
+        return rc, (json.loads(out) if out.strip() else None), err
 
     def run(self, *args: str):
         self.capsys.readouterr()

@@ -16,6 +16,7 @@ def _load(rel):
 
 @pytest.mark.parametrize("schema,example", [
     ("schemas/manifest.schema.json", "examples/skills.manifest.json"),
+    ("schemas/global-manifest.schema.json", "examples/global.manifest.json"),
     ("schemas/store.schema.json", "examples/store.json"),
     ("schemas/recipe.schema.json", "examples/recipes/godot47-asset-pipeline.recipe.json"),
     ("schemas/recipe.schema.json", "examples/recipes/gltf2-spec.recipe.json"),
@@ -33,3 +34,18 @@ def test_generated_files_validate(env):
     env.log_use("alpha", "2026-11-05T00:00:00Z")
     rec = json.loads(env.store.paths.usage.read_text().splitlines()[0])
     jsonschema.validate(rec, _load("schemas/usage-record.schema.json"))
+
+
+def test_generated_global_manifest_validates(env):
+    env.add_skill("alpha")
+    env.run_raw("--global", "link", "alpha")
+    jsonschema.validate(env.global_manifest(), _load("schemas/global-manifest.schema.json"))
+
+
+def test_global_manifest_schema_matches_project_schema():
+    """Same fields and rules; only the titles and descriptions differ."""
+    def strip(node):
+        if isinstance(node, dict):
+            return {k: strip(v) for k, v in node.items() if k not in ("title", "description", "$id")}
+        return node
+    assert strip(_load("schemas/global-manifest.schema.json")) == strip(_load("schemas/manifest.schema.json"))
