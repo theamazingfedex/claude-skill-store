@@ -22,6 +22,7 @@ Works on **Windows** (NTFS junctions, no admin or Developer Mode needed) and **L
 - [Unlink safety (hard rule)](#unlink-safety-hard-rule)
 - [Verify in a fresh Claude Code session](#verify-in-a-fresh-claude-code-session)
 - [Troubleshooting](#troubleshooting)
+- [Uninstall](#uninstall): [Windows](#uninstall-on-windows-powershell) · [Linux](#uninstall-on-linux-bash) · [Manual fallback](#manual-fallback)
 - [Command reference](#command-reference) · [Repo layout](#repo-layout) · [License](#license)
 
 ## Why: the context budget
@@ -800,11 +801,124 @@ sh scripts/test-local.sh --other-volume /mnt/c/Users/<you>/AppData/Local/Temp --
   bootstrapped from `get-pip.py` (no sudo).
 - Extra arguments go to pytest (after `--` for the `.sh` script).
 
+## Uninstall
+
+`uninstall.ps1` (Windows) and `uninstall.sh` (Linux/macOS) in the repo root remove skill-store from
+the machine. Both run `skillstore/uninstall.py` straight from your clone, so they work after the
+package is gone and don't need PyYAML. They need Python 3.10+.
+
+What the script does, in order:
+
+1. **Finds** the store (`--store`, then `SKILL_STORE_HOME`, then `~/.skill-store`) and the Claude
+   config dir (`CLAUDE_CONFIG_DIR`, else `~/.claude`).
+2. **Shows a summary** of every skill in `<store>/skills`: whether it is approved, whether it is
+   linked globally or in which projects, whether the store entry is a link to an outside checkout,
+   and two token figures. `LISTING` is the description's chars/4, which every session pays on every
+   turn while the skill is installed. `BODY` is the `SKILL.md` body's chars/4, paid once the skill
+   is invoked. It also prints both totals for the skills it would restore.
+3. **Asks** `Restore all N cached skills into your global Claude skills (<CLAUDE_CONFIG_DIR>/skills)?`
+   (default: no). If you say yes, each skill becomes a standalone global skill. A store skill is
+   copied there, replacing its global store link. A store entry that links to a checkout is
+   recreated as a link straight to that checkout (a junction on Windows, a symlink on Linux). If
+   something that isn't a skill-store link already uses the name, that skill is skipped and
+   reported. The existing entry is never overwritten.
+4. **Shows the removal plan and asks once more**, then removes:
+   - every store link: global ones, and project links in every project it finds (projects in
+     `usage.jsonl`, their git worktrees, the old `~/.claude/skills.manifest.json` setup, and each
+     `--project DIR` you pass). Each link is removed on its own and non-recursively;
+   - the skill-store hook entries in `<CLAUDE_CONFIG_DIR>/settings.json` (any hook whose command
+     mentions skill-store or the hook wrappers). It saves a timestamped backup next to the file
+     first, and leaves every other setting and hook as it was;
+   - the package: pip installs (`claude-skill-store`, for each Python it finds), pipx and
+     `uv tool` installs, and the venv that `scripts/test-local.*` made in the system temp dir.
+     An editable install's source is your clone, which is kept;
+   - `SKILL_STORE_HOME` and `SKILL_STORE_CMD`: on Windows from your user environment; on Linux
+     the lines in `~/.bashrc`, `~/.profile`, `~/.zshrc` etc. (and PowerShell profiles) that mention
+     skill-store. Profile lines are shown first and removed only after you confirm, with a backup
+     of each file. The PATH entry from [Install](#install) (pip's user `Scripts` dir on Windows,
+     the `~/.local/bin` line on Linux) is removed only if no other program is installed there;
+   - the old `--project ~` files (`~/.claude/skills.manifest.json` and the unchanged
+     `.gitignore` skill-store wrote next to the global links);
+   - the store directory. It first removes every link inside it one by one, non-recursively
+     (e.g. `skills/<name>` pointing at a checkout), checks that no symlink or junction is left,
+     and only then deletes the directory. The delete itself refuses to go through a link, so a
+     linked checkout is never touched.
+5. **Prints a report** of what was restored, removed, skipped and left in place.
+
+It never deletes your clone, never touches entries in `~/.claude/skills` that aren't store links
+(other tools' links, `synced/`, `.trash/`, your own skill directories), and never edits files in
+your repos. It lists these instead, for you to remove in a normal commit:
+`.claude/skills.manifest.json`, `.claude/skills/.gitignore`, the unlink-safety section in
+`CLAUDE.md`, and any hooks in a project's `.claude/settings.json`.
+
+| Flag | Effect |
+|---|---|
+| `--dry-run` | show the summary and the full plan; change nothing |
+| `--yes` | don't ask anything; restore stays off unless you also pass `--restore` |
+| `--restore` / `--no-restore` | answer the restore question in advance |
+| `--store DIR` | the store to remove (default: `SKILL_STORE_HOME`, then `~/.skill-store`) |
+| `--project DIR` | also remove the store links in this project (repeatable) |
+
+The exit code is `0` when everything succeeded and `1` if anything failed or you stopped at a
+prompt. Failures are listed under `Errors` in the report.
+
+### Uninstall on Windows (PowerShell)
+
+```powershell
+Set-Location "$env:USERPROFILE\src\claude-skill-store"
+.\uninstall.ps1 --dry-run                          # look first: summary and plan, nothing changes
+.\uninstall.ps1                                    # interactive: restore? then confirm the plan
+.\uninstall.ps1 --project D:\src\my-game           # also clean a project the script can't find
+.\uninstall.ps1 --yes --restore                    # unattended, keeping the skills as global skills
+```
+
+If PowerShell refuses to run the script, use
+`powershell -ExecutionPolicy Bypass -File .\uninstall.ps1 --dry-run`. If you used skill-store in
+WSL too, run `uninstall.sh` inside each distro. Open a new terminal afterwards so the environment
+changes apply, and restart Claude Code.
+
+### Uninstall on Linux (bash)
+
+```bash
+cd ~/src/claude-skill-store
+sh uninstall.sh --dry-run                          # look first: summary and plan, nothing changes
+sh uninstall.sh                                    # interactive: restore? then confirm the plan
+sh uninstall.sh --project ~/src/my-game            # also clean a project the script can't find
+sh uninstall.sh --yes --restore                    # unattended, keeping the skills as global skills
+unset SKILL_STORE_HOME                             # for the current shell
+```
+
+macOS works like Linux. When you're done, delete the clone yourself.
+
+### Manual fallback
+
+If you can't run the script, do the same steps by hand, in this order. **Never** delete anything
+under `.claude/skills/` or the store recursively while links are in it (see
+[Unlink safety](#unlink-safety-hard-rule)).
+
+1. Remove the links: `skill-store --global unlink --all`, then `skill-store unlink --all` in each
+   project and worktree. Any links you missed point into `<store>/skills`. Find them with
+   `find ~ -type l -lname "$HOME/.skill-store/skills/*"` (Linux) or
+   `Get-ChildItem $HOME -Recurse -Directory -Attributes ReparsePoint -ErrorAction SilentlyContinue | Where-Object { "$($_.Target)" -like "$HOME\.skill-store\skills*" }`
+   (Windows), and remove each one with `rm -- <path>` or
+   `[System.IO.Directory]::Delete('<path>', $false)`.
+2. Delete the skill-store hook entries from `~/.claude/settings.json` (back the file up first).
+3. Uninstall the package: `pip uninstall claude-skill-store`, or `pipx uninstall claude-skill-store`
+   / `uv tool uninstall claude-skill-store`.
+4. Remove `SKILL_STORE_HOME` (Windows:
+   `[Environment]::SetEnvironmentVariable('SKILL_STORE_HOME', $null, 'User')`; Linux: delete the
+   `export` line from your shell profile).
+5. Remove the links inside the store (`ls -l ~/.skill-store/skills` or
+   `Get-ChildItem ~\.skill-store\skills | Where-Object LinkType`) one by one, the same way. Then
+   delete the store: `rm -r -- ~/.skill-store` or
+   `Remove-Item -Recurse "$HOME\.skill-store"`, and **only** once no link is left inside it.
+
 ## Repo layout
 
 | Path | Contents |
 |---|---|
-| `skillstore/` | the Python CLI (`skill-store`, `python -m skillstore`) |
+| `skillstore/` | the Python CLI (`skill-store`, `python -m skillstore`) and `uninstall.py` |
+| `uninstall.ps1`, `uninstall.sh` | thin wrappers around `skillstore/uninstall.py`; see [Uninstall](#uninstall) |
 | `bin/` | thin `skill-store.ps1` / `.sh` / `.cmd` wrappers |
 | `schemas/`, `examples/` | JSON Schemas (project and global manifest, store, usage record, recipe); example manifests, `store.json`, recipes |
 | `tests/` | tests for link/unlink/sync/prune safety and the build pipeline: `pip install -e ".[test]"` then `pytest` |
